@@ -206,15 +206,27 @@ export function LaxreeEmpHrReport() {
             </div>
             {dataStatus === 'no-erp-punches-leaves-only' ? (
               <div>
-                The ERP punch-in feature was launched on 1 Aug 2026 — before that date, attendance
-                was tracked in HRMS only. We've merged <strong>{hrmsLeavesMergedCount}</strong> approved
-                leave record(s) from HRMS into this report. Punch counts will be 0 for this month.
+                No ERP punch records exist for {MONTHS.find(m => m.value === month)?.label} {year},
+                but we've merged <strong>{hrmsLeavesMergedCount}</strong> approved leave record(s)
+                from HRMS into this report. Punch counts will be 0 for this month.
+                {month >= 8 && year >= 2026 && (
+                  <> If you have been punching in this month, the punch may have failed due to
+                  <strong> no office assigned</strong> to your account. Try punching in again — the
+                  system now auto-resolves your office from your HRMS location.</>
+                )}
               </div>
             ) : (
               <div>
-                The ERP punch-in feature was launched on 1 Aug 2026 — no punch or leave data exists
-                for this month in either ERP or HRMS. All attendance numbers will be 0. Switch to
-                Aug 2026 or later to see your punch data.
+                No ERP punch records exist for {MONTHS.find(m => m.value === month)?.label} {year}.
+                {month >= 8 && year >= 2026 ? (
+                  <> This is most likely because your account had <strong>no office assigned</strong>,
+                  which caused every punch attempt to fail with "No office assigned". The system now
+                  auto-resolves your office from your HRMS location — try punching in again from the
+                  dashboard, and your attendance will appear here within ~30 seconds.</>
+                ) : (
+                  <> The ERP punch-in feature was launched on 1 Aug 2026, so earlier months have no
+                  punch data. Switch to Aug 2026 or later to see your punch data.</>
+                )}
               </div>
             )}
           </div>
