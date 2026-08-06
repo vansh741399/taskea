@@ -709,19 +709,90 @@ function computeEmployeeReport(
   // v25·0806-out-of-10: Scoring is now OUT OF 10.
   //   Start at 10, apply deductions per the marking scheme.
   //   Final score is clamped between 0 and 10.
+  //
+  // v25·0806-progressive-scoring: PROGRESSIVE/TIERED deductions.
+  //   Previous logic only had two thresholds per category (e.g. uninformed>1 → -1,
+  //   uninformed>3 → -2, capped at -3 no matter how many). This meant someone with
+  //   4 uninformed leaves and someone with 21 uninformed leaves got the SAME -3
+  //   deduction — clearly wrong. Aayush had 21 uninformed leaves but scored 7/10
+  //   (AVERAGE) which made no sense.
+  //
+  //   NEW progressive tiers — more violations = more deduction, no hard cap:
+  //     UNINFORMED LEAVES:
+  //       0-1   →  0
+  //       2-3   → -1
+  //       4-5   → -2
+  //       6-8   → -3
+  //       9-12  → -4
+  //       13-17 → -5
+  //       18+   → -6
+  //     FULL DAY LEAVES:
+  //       0-2   →  0
+  //       3-5   → -1
+  //       6-8   → -2
+  //       9-12  → -3
+  //       13+   → -4
+  //     LATE/EARLY COMBINED:
+  //       0-1   →  0
+  //       2-4   → -1
+  //       5-7   → -2
+  //       8-10  → -3
+  //       11+   → -4
+  //     HALF DAYS:
+  //       0-2   →  0
+  //       3-4   → -1
+  //       5-6   → -2
+  //       7-8   → -3
+  //       9+    → -4
+  //
+  //   Max possible total deduction = 6 + 4 + 4 + 4 = 18, but the final score
+  //   is clamped to [0, 10] so it can never go negative.
   const baseScore = MAX_SCORE // Always starts at 10/10
   let deductions = 0
   const deductionDetails: string[] = []
 
-  if (totalLeaveDays > 2) { deductions += 1; deductionDetails.push('-1 (leaves > 2)') }
-  if (lateComingsEarlyGoings > 1) { deductions += 1; deductionDetails.push('-1 (late/early > 1)') }
-  if (uninformedLeaves > 1) { deductions += 1; deductionDetails.push('-1 (uninformed > 1)') }
-  if (halfDayLeaves > 2) { deductions += 1; deductionDetails.push('-1 (half days > 2)') }
+  // Helper: progressive tier lookup
+  const tierDeduction = (count: number, tiers: [number, number][]): number => {
+    // tiers: array of [minCount, deduction] sorted ascending by minCount.
+    // Returns the deduction for the highest tier whose minCount <= count.
+    let ded = 0
+    for (const [minCount, d] of tiers) {
+      if (count >= minCount) ded = d
+    }
+    return ded
+  }
 
-  if (totalLeaveDays > 5) { deductions += 2; deductionDetails.push('-2 (leaves > 5)') }
-  if (lateComingsEarlyGoings > 4) { deductions += 2; deductionDetails.push('-2 (late/early > 4)') }
-  if (uninformedLeaves > 3) { deductions += 2; deductionDetails.push('-2 (uninformed > 3)') }
-  if (halfDayLeaves > 4) { deductions += 2; deductionDetails.push('-2 (half days > 4)') }
+  const uninfDed = tierDeduction(uninformedLeaves, [
+    [2, 1], [4, 2], [6, 3], [9, 4], [13, 5], [18, 6],
+  ])
+  if (uninfDed > 0) {
+    deductions += uninfDed
+    deductionDetails.push(`-${uninfDed} (uninformed=${uninformedLeaves})`)
+  }
+
+  const leaveDed = tierDeduction(totalLeaveDays, [
+    [3, 1], [6, 2], [9, 3], [13, 4],
+  ])
+  if (leaveDed > 0) {
+    deductions += leaveDed
+    deductionDetails.push(`-${leaveDed} (leaves=${totalLeaveDays})`)
+  }
+
+  const lateEarlyDed = tierDeduction(lateComingsEarlyGoings, [
+    [2, 1], [5, 2], [8, 3], [11, 4],
+  ])
+  if (lateEarlyDed > 0) {
+    deductions += lateEarlyDed
+    deductionDetails.push(`-${lateEarlyDed} (late/early=${lateComingsEarlyGoings})`)
+  }
+
+  const halfDayDed = tierDeduction(halfDayLeaves, [
+    [3, 1], [5, 2], [7, 3], [9, 4],
+  ])
+  if (halfDayDed > 0) {
+    deductions += halfDayDed
+    deductionDetails.push(`-${halfDayDed} (half days=${halfDayLeaves})`)
+  }
 
   // Cap deductions: never let score go below 0 or above 10
   const overallScore = Math.max(0, Math.min(MAX_SCORE, baseScore - deductions))

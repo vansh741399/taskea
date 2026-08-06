@@ -1,177 +1,139 @@
-// Create new Taskea accounts for 4 HRMS employees who have email/mobile
-// but no Taskea account yet. Also link Girish Shahani (existing user) to
-// his HRMS record (he was missing the hrmsId link).
-//
-// SAFETY:
-//   - Only INSERTs new rows into the ERP "User" table (no HRMS modifications)
-//   - Never deletes or modifies existing users
-//   - Uses cuid-style IDs compatible with Prisma
-//   - Sets isActive=true so they can log in immediately
-//   - Default password pattern: FirstName@2025 (user can change later)
-import { Pool } from 'pg'
+// ════════════════════════════════════════════════════════════════════════
+// Create ERP user dashboards for all active HRMS employees that don't have one yet.
+// IDEMPOTENT: uses INSERT ... ON CONFLICT DO NOTHING (safe to re-run).
+// NO HRMS modification — only ERP User table INSERTs.
+// ════════════════════════════════════════════════════════════════════════
+import { Client } from 'pg'
+import { randomBytes } from 'crypto'
 
-const ERP_URL = 'postgresql://neondb_owner:npg_V0CoL3SDNcKm@ep-noisy-bonus-app8563v.c-7.us-east-1.aws.neon.tech/neondb?sslmode=require'
-const HRMS_URL = 'postgresql://neondb_owner:npg_pGbVon2mrZ3q@ep-empty-haze-aq8y1r98-pooler.c-8.us-east-1.aws.neon.tech/neondb?sslmode=require'
+const ERP_DB_URL = 'postgresql://neondb_owner:npg_V0CoL3SDNcKm@ep-noisy-bonus-app8563v-pooler.c-7.us-east-1.aws.neon.tech/neondb?sslmode=require'
+const HRMS_DB_URL = 'postgresql://neondb_owner:npg_pGbVon2mrZ3q@ep-empty-haze-aq8y1r98-pooler.c-8.us-east-1.aws.neon.tech/neondb?sslmode=require'
 
-const erp = new Pool({ connectionString: ERP_URL, max: 2, ssl: { rejectUnauthorized: false } })
-const hrms = new Pool({ connectionString: HRMS_URL, max: 2, ssl: { rejectUnauthorized: false } })
-
-function generateCuidId() {
-  const ts = Date.now().toString(36).padStart(8, '0').slice(-8)
-  const rand = Math.random().toString(36).slice(2, 14).padEnd(12, '0')
-  return `c${ts}${rand}`.slice(0, 24)
+// Helper: generate a cuid-like ID (24 hex chars)
+function genId() {
+  return 'u' + randomBytes(12).toString('hex')
 }
 
-console.log('=== STEP 1: Fetch HRMS records for the 4 employees to create ===')
-const hrmsIds = ['EMP-002', 'EMP-041', 'EMP-432', 'EMP-501']
-const hrmsEmps = await hrms.query(`
-  SELECT id, "employeeId", "fullName", email, mobile, location, department,
-         designation, firm, "employmentType", "joiningDate"
-  FROM "Employee"
-  WHERE "employeeId" = ANY($1) AND status = 'Yes'
-  ORDER BY "employeeId" ASC
-`, [hrmsIds])
-console.log(`Found ${hrmsEmps.rows.length} HRMS employees:`)
-console.table(hrmsEmps.rows)
-
-// Check if offices exist for their locations
-console.log('\n=== STEP 2: Check existing OfficeLocations ===')
-const offices = await erp.query(`
-  SELECT id, name, city, "isActive" FROM "OfficeLocation" ORDER BY city
-`)
-console.table(offices.rows)
-
-// Map location name → officeId
-const officeByCity = {}
-for (const o of offices.rows) {
-  const cityKey = o.city.toLowerCase()
-  if (!officeByCity[cityKey]) officeByCity[cityKey] = o.id
+// Helper: generate a username from full name (lowercase, first name, or first+last initial)
+function genUsername(fullName, existingUsernames) {
+  const parts = fullName.toLowerCase().trim().split(/\s+/).filter(Boolean)
+  if (parts.length === 0) return 'emp' + Math.floor(Math.random() * 10000)
+  let base = parts[0]
+  // If single name, use it
+  // If conflicts with existing, try first+lastinitial, then add number
+  let username = base
+  let suffix = 1
+  while (existingUsernames.has(username)) {
+    if (suffix === 1 && parts.length > 1) {
+      username = base + parts[parts.length - 1][0]
+    } else {
+      username = base + suffix
+    }
+    suffix++
+  }
+  existingUsernames.add(username)
+  return username
 }
-// Add fuzzy mappings
-officeByCity['gurgaon'] = officeByCity['gurgaon'] || officeByCity['gurugram']
-officeByCity['gurugram'] = officeByCity['gurugram'] || officeByCity['gurgaon']
 
-console.log('\n=== STEP 3: Check if any of these employees already exist in Taskea ===')
-const existingEmails = hrmsEmps.rows.map(e => e.email).filter(Boolean)
-const existingUsers = await erp.query(`
-  SELECT id, name, email FROM "User" WHERE email = ANY($1)
-`, [existingEmails])
-console.log('Already existing users with these emails:')
-console.table(existingUsers.rows)
+// Helper: generate default password (Name@2025 format)
+function genPassword(fullName) {
+  const parts = fullName.trim().split(/\s+/).filter(Boolean)
+  if (parts.length === 0) return 'Employee@2025'
+  // Capitalize first letter of first name, remove spaces, add @2025
+  const name = parts[0].charAt(0).toUpperCase() + parts[0].slice(1).toLowerCase()
+  return `${name}@2025`
+}
 
-console.log('\n=== STEP 4: Create new Taskea accounts ===')
-const results = []
-for (const emp of hrmsEmps.rows) {
-  // Skip if already exists
-  if (existingUsers.rows.some(u => u.email === emp.email)) {
-    results.push({
-      employeeId: emp.employeeId,
-      name: emp.fullName,
-      status: 'skipped',
-      reason: 'User with this email already exists in Taskea',
-    })
-    continue
+// Map HRMS location to ERP officeId (need to query ERP for office IDs)
+async function getOfficeMap(erp) {
+  const r = await erp.query(`SELECT id, name FROM "OfficeLocation" WHERE "isActive" = true`)
+  const map = {}
+  for (const o of r.rows) {
+    // Match by partial name
+    const n = o.name.toLowerCase()
+    if (n.includes('ajmer')) map['Ajmer'] = o.id
+    else if (n.includes('jaipur')) map['Jaipur'] = o.id
+    else if (n.includes('gurugram') || n.includes('gurgaon')) map['Gurgaon'] = o.id
+    // Roofing Factory and Palra Warehouse — default to Ajmer office
+    if (!map['Roofing Factory']) map['Roofing Factory'] = o.id
+    if (!map['Palra Warehouse']) map['Palra Warehouse'] = o.id
+  }
+  return map
+}
+
+async function main() {
+  const erp = new Client({ connectionString: ERP_DB_URL, ssl: { rejectUnauthorized: false } })
+  const hrms = new Client({ connectionString: HRMS_DB_URL, ssl: { rejectUnauthorized: false } })
+  await erp.connect()
+  await hrms.connect()
+
+  // 1. Get active HRMS employees
+  const hrmsRes = await hrms.query(`
+    SELECT id, "employeeId", "fullName", designation, department, firm, location,
+           "employmentType", "joiningDate"
+    FROM "Employee"
+    WHERE status = 'Yes' AND "relievingDate" IS NULL
+    ORDER BY "fullName"
+  `)
+  console.log(`HRMS active employees: ${hrmsRes.rows.length}`)
+
+  // 2. Get existing ERP users (hrmsId links + loginUsernames)
+  const erpRes = await erp.query(`SELECT id, name, "loginUsername", "hrmsId" FROM "User"`)
+  const linkedHrmsIds = new Set(erpRes.rows.filter(u => u.hrmsId).map(u => u.hrmsId))
+  const existingUsernames = new Set(erpRes.rows.filter(u => u.loginUsername).map(u => u.loginUsername))
+  console.log(`Existing ERP users: ${erpRes.rows.length}, linked hrmsIds: ${linkedHrmsIds.size}`)
+
+  // 3. Get office map
+  const officeMap = await getOfficeMap(erp)
+  console.log(`Office map:`, officeMap)
+
+  // 4. Find missing
+  const missing = hrmsRes.rows.filter(e => !linkedHrmsIds.has(e.id))
+  console.log(`\nMissing dashboards: ${missing.length}`)
+
+  if (missing.length === 0) {
+    console.log('All active HRMS employees already have ERP dashboards. Nothing to do.')
+    await erp.end(); await hrms.end()
+    return
   }
 
-  // Generate credentials
-  const firstName = emp.fullName.split(' ')[0].toLowerCase()
-  const loginUsername = firstName
-  const loginPassword = `${emp.fullName.split(' ')[0]}@2025`
-  const userId = generateCuidId()
-  const officeId = officeByCity[(emp.location || '').toLowerCase()] || null
+  // 5. Create ERP users for missing
+  let created = 0
+  for (const emp of missing) {
+    const userId = genId()
+    const username = genUsername(emp.fullName, existingUsernames)
+    const password = genPassword(emp.fullName)
+    const officeId = officeMap[emp.location] || officeMap['Ajmer'] || null
 
-  // Use HRMS email as Taskea email (or generate a fallback)
-  const email = emp.email || `${firstName}@laxree.com`
-
-  try {
-    await erp.query(`
-      INSERT INTO "User" (
-        id, name, email, phone, role, department, designation, location,
-        "hrmsId", "officeId", "loginUsername", "loginPassword",
-        "isActive", "createdAt", "updatedAt"
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, true, NOW(), NOW())
-    `, [
-      userId,
-      emp.fullName,
-      email,
-      emp.mobile || null,
-      'EMPLOYEE',
-      emp.department || null,
-      emp.designation || null,
-      emp.location || null,
-      emp.id, // hrmsId = HRMS Employee.id (cuid)
-      officeId,
-      loginUsername,
-      loginPassword,
-    ])
-    results.push({
-      employeeId: emp.employeeId,
-      hrmsCuid: emp.id,
-      name: emp.fullName,
-      email,
-      mobile: emp.mobile,
-      loginUsername,
-      loginPassword,
-      officeId,
-      location: emp.location,
-      status: 'created',
-      userId,
-    })
-    console.log(`✅ Created account for ${emp.fullName} (${emp.employeeId}) — username: ${loginUsername}, password: ${loginPassword}`)
-  } catch (e) {
-    results.push({
-      employeeId: emp.employeeId,
-      name: emp.fullName,
-      status: 'failed',
-      error: e.message,
-    })
-    console.error(`❌ Failed to create ${emp.fullName}: ${e.message}`)
+    try {
+      await erp.query(`
+        INSERT INTO "User" (id, name, email, role, "loginUsername", "loginPassword",
+                           "hrmsId", "officeId", "isActive", "joinDate", "createdAt", "updatedAt")
+        VALUES ($1, $2, $3, 'EMPLOYEE', $4, $5, $6, $7, true, $8, NOW(), NOW())
+        ON CONFLICT (id) DO NOTHING
+      `, [
+        userId,
+        emp.fullName,
+        `${username}@laxree.com`,
+        username,
+        password,
+        emp.id,  // hrmsId (cuid from HRMS)
+        officeId,
+        emp.joiningDate || new Date(),
+      ])
+      console.log(`  ✓ Created: ${emp.fullName} | username=${username} | password=${password} | hrmsId=${emp.employeeId} | office=${emp.location}`)
+      created++
+    } catch (e) {
+      console.error(`  ✗ FAILED: ${emp.fullName} — ${e.message}`)
+    }
   }
+
+  console.log(`\n=== SUMMARY ===`)
+  console.log(`Created ${created} new ERP user dashboards.`)
+  console.log(`All can log in at https://task.ea.laxree.com with their username + password.`)
+  console.log(`All have role=EMPLOYEE → they get the employee dashboard (punch-in, attendance, salary slip, leaves, my HR report).`)
+
+  await erp.end(); await hrms.end()
 }
 
-console.log('\n=== STEP 5: Link Girish Shahani (existing user) to HRMS record ===')
-// Girish Shahani in Taskea → Girish Shani in HRMS (EMP-429)
-const girishHrms = await hrms.query(`
-  SELECT id, "employeeId", "fullName" FROM "Employee"
-  WHERE "employeeId" = 'EMP-429' LIMIT 1
-`)
-console.log('HRMS Girish:', girishHrms.rows[0])
-
-if (girishHrms.rows.length > 0) {
-  const girishUpdate = await erp.query(`
-    UPDATE "User"
-    SET "hrmsId" = $1, "updatedAt" = NOW()
-    WHERE email = 'sales2@laxree.com' AND "hrmsId" IS NULL
-    RETURNING id, name, email, "hrmsId"
-  `, [girishHrms.rows[0].id])
-  console.log('Updated Girish:', girishUpdate.rows[0] || '(no rows — already linked or not found)')
-}
-
-console.log('\n=== STEP 6: Final summary ===')
-console.table(results)
-
-console.log('\n=== STEP 7: Verify all users with their HRMS linkage ===')
-const finalCheck = await erp.query(`
-  SELECT u.id, u.name, u.email, u.role, u."loginUsername", u."loginPassword",
-         u."isActive", u."hrmsId", e."employeeId" AS "hrmsEmployeeCode",
-         e."fullName" AS "hrmsName", o.city AS "officeCity"
-  FROM "User" u
-  LEFT JOIN "Employee" e ON e.id = u."hrmsId"
-  LEFT JOIN "OfficeLocation" o ON o.id = u."officeId"
-  WHERE u."isActive" = true
-  ORDER BY u.role DESC, u.name ASC
-`)
-console.log(`Active Taskea users: ${finalCheck.rows.length}`)
-console.table(finalCheck.rows.map(r => ({
-  name: r.name,
-  email: r.email,
-  role: r.role,
-  username: r.loginUsername,
-  password: r.loginPassword,
-  hrmsLinked: r.hrmsEmployeeCode ? `✅ ${r.hrmsEmployeeCode}` : '❌',
-  office: r.officeCity || '—',
-})))
-
-await erp.end()
-await hrms.end()
-console.log('\n✅ Done.')
+main().catch(e => { console.error(e); process.exit(1) })
