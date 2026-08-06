@@ -284,7 +284,35 @@ export async function GET(request: NextRequest) {
     //
     // NOTE: hrmsEmployees is fetched first (line below) so we can match
     // HRMS leaves to ERP users by name/hrmsId.
-    const hrmsEmployees = await fetchHrmsEmployees()
+    const hrmsEmployeesRaw = await fetchHrmsEmployees()
+
+    // v25·0806-active-only: Only ACTIVE HRMS employees should appear in the
+    // HR report. An employee is considered active when:
+    //   - status === 'Yes' (HRMS uses 'Yes'/'No' text values)
+    //   - AND relievingDate is null (no relieving date set)
+    // This is a defensive filter — even if an ERP user is marked isActive=true
+    // but their HRMS record is inactive (e.g. Aayush, status=No), they will
+    // still be excluded from the report. The user explicitly stated:
+    // "Jo hrms mein inactive hain unki need nahi hain jo active hain unhi k chiye"
+    const isHrmsActive = (e: { status?: string | null; relievingDate?: string | null }) => {
+      const s = String(e?.status || '').trim().toLowerCase()
+      return (s === 'yes' || s === 'true' || s === '1' || s === 'active') && !e?.relievingDate
+    }
+    const hrmsEmployees = hrmsEmployeesRaw.filter(isHrmsActive)
+
+    // Build a set of inactive-HRMS ERP user IDs so we can exclude them below.
+    // (isActive=true in ERP but HRMS record inactive.)
+    const inactiveHrmsErpUserIds = new Set<string>()
+    for (const u of users) {
+      const hrmsEmp = findHrmsEmployeeByHrmsId(hrmsEmployeesRaw, u.hrmsId) ||
+        findHrmsEmployeeByName(hrmsEmployeesRaw, u.name)
+      if (hrmsEmp && !isHrmsActive(hrmsEmp)) {
+        inactiveHrmsErpUserIds.add(u.id)
+      }
+    }
+    if (inactiveHrmsErpUserIds.size > 0) {
+      console.log(`[hr-report] Excluding ${inactiveHrmsErpUserIds.size} ERP user(s) whose HRMS record is inactive.`)
+    }
 
     const hrmsLeavesAll = await fetchHrmsLeaves()
     // Build a set of (userId + fromDateStr) keys for ERP leaves to dedupe
@@ -340,7 +368,13 @@ export async function GET(request: NextRequest) {
     }
 
     // 5. Compute stats per user
-    const report = users.map((user, index) => {
+    // v25·0806-active-only: Skip ERP users whose HRMS record is inactive.
+    // We still process them above (so we don't break indexing), but we filter
+    // them out of the final `report` array before returning. This keeps the
+    // founder/admin HR report strictly limited to ACTIVE HRMS employees.
+    const report = users
+      .filter(u => !inactiveHrmsErpUserIds.has(u.id))
+      .map((user, index) => {
       let userPunches: PunchLike[] = punches.filter(p => p.userId === user.id)
       const userLeaves = leaves.filter(l => l.userId === user.id)
 
@@ -358,6 +392,9 @@ export async function GET(request: NextRequest) {
 
       return computeEmployeeReport(user, userPunches, userLeaves, hrmsEmp, index, month, year, daysInMonth)
     })
+
+    // Re-number SNO after filtering so it's sequential 1..N
+    report.forEach((r, i) => { r.sno = i + 1 })
 
     // ─── Return in requested format ───
     if (format === 'xlsx') {
