@@ -177,10 +177,20 @@ export async function upsertHrmsAttendanceRecord(
   }
 
   const parts = getIstParts(input.date)
-  // IST midnight expressed as a UTC Date — this is what the HRMS Attendance.date
-  // column stores (the HRMS app uses Prisma with @db.Timestamp in IST context).
-  const istMidnightUtcMs = Date.UTC(parts.year, parts.month - 1, parts.day) - IST_OFFSET_MS
-  const dateOnly = new Date(istMidnightUtcMs)
+  // CRITICAL: Store the date as midnight UTC of the IST calendar date —
+  // NOT midnight IST (which would be Aug-05 18:30 UTC for Aug-6 IST).
+  //
+  // Why: The HRMS Attendance.date column is `timestamp without time zone`.
+  // The HRMS app's existing July records are stored like `2026-07-30T00:00:00Z`
+  // (midnight UTC of the calendar date). The HRMS frontend queries with
+  // `WHERE date >= '2026-08-06 00:00:00'` to find Aug-6 records. If we store
+  // `2026-08-05 18:30:00` (midnight IST), it falls BEFORE that range and the
+  // record shows up as August 5 in HRMS — that was the marking bug.
+  //
+  // Fix: Always use Date.UTC(y, m-1, d) to get midnight UTC of the IST
+  // calendar date. Postgres stores it literally as `2026-08-06 00:00:00`,
+  // which matches HRMS's date-range queries correctly.
+  const dateOnly = new Date(Date.UTC(parts.year, parts.month - 1, parts.day))
 
   const dayOfWeek = parts.dayOfWeek
   const isSunday = dayOfWeek === 0
@@ -196,14 +206,18 @@ export async function upsertHrmsAttendanceRecord(
   try {
     await client.query('BEGIN')
 
-    // Check if record exists for this employee + date (IST day boundaries in UTC)
+    // Check if record exists for this employee + date (IST calendar date
+    // stored as midnight UTC, matching the HRMS app's convention).
+    // We query the full day range from midnight UTC of the IST calendar date.
+    const dayStartUtc = Date.UTC(parts.year, parts.month - 1, parts.day)
+    const dayEndUtc = dayStartUtc + 24 * 60 * 60 * 1000 - 1
     const existing = await client.query(
       `SELECT id FROM "Attendance"
        WHERE "employeeId" = $1
-         AND date >= $2::timestamp
-         AND date < ($2::timestamp + INTERVAL '1 day')
+         AND date >= to_timestamp($2 / 1000.0)
+         AND date <= to_timestamp($3 / 1000.0)
        LIMIT 1`,
-      [input.hrmsEmployeeId, dateOnly]
+      [input.hrmsEmployeeId, dayStartUtc, dayEndUtc]
     )
 
     let id: string
@@ -214,23 +228,21 @@ export async function upsertHrmsAttendanceRecord(
       mode = 'update'
       await client.query(
         `UPDATE "Attendance"
-         SET "checkIn" = $3,
-             "checkOut" = $4,
-             "totalHours" = $5,
-             status = $6,
-             "lateEntry" = $7,
-             "earlyOut" = $8,
-             "halfDay" = $9,
-             "overtimeHours" = $10,
-             "isSunday" = $11,
-             "isWeeklyOff" = $12,
-             "sundayHours" = $13,
-             remarks = $14,
+         SET "checkIn" = $1,
+             "checkOut" = $2,
+             "totalHours" = $3,
+             status = $4,
+             "lateEntry" = $5,
+             "earlyOut" = $6,
+             "halfDay" = $7,
+             "overtimeHours" = $8,
+             "isSunday" = $9,
+             "isWeeklyOff" = $10,
+             "sundayHours" = $11,
+             remarks = $12,
              "updatedAt" = NOW()
-         WHERE id = $2`,
+         WHERE id = $13`,
         [
-          input.hrmsEmployeeId,
-          id,
           checkInStr,
           checkOutStr,
           Math.round(input.totalHours * 100) / 100,
@@ -243,6 +255,7 @@ export async function upsertHrmsAttendanceRecord(
           isWeeklyOff,
           sundayHours,
           remarks,
+          id,
         ]
       )
     } else {
