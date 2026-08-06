@@ -232,8 +232,34 @@ export const useWorkflowStore = create<WorkflowStore>()(
       // whether to show login or dashboard. Without this, the first render
       // after refresh always showed the login page (because currentUser is
       // null in initialState until persist hydrates it).
+      //
+      // v25·0806-stuck-splash-fix: ALSO arm a 1.5s safety timeout that forces
+      // _hasHydrated=true even if onRehydrateStorage never fires. This happens
+      // when the user's localStorage entry is corrupted (e.g. older schema
+      // from a previous deploy), which leaves the user STUCK FOREVER on the
+      // "LAXREE" splash placeholder. The timeout guarantees the app always
+      // renders either the login form or the dashboard — never a frozen
+      // splash screen.
       onRehydrateStorage: () => (state) => {
         state?.setHasHydrated(true)
+      },
+      // ⚠️ migrate v0→v1: drop any older persisted shape that may have caused
+      // the hydration to throw silently. Without this, Zustand persist will
+      // try to read an incompatible shape and silently skip the onRehydrate
+      // callback, leaving _hasHydrated=false forever.
+      version: 1,
+      migrate: (persistedState: any, _version: number) => {
+        // Be defensive: only keep known-good auth fields, drop anything else.
+        if (!persistedState || typeof persistedState !== 'object') return {}
+        const s = persistedState as Record<string, unknown>
+        return {
+          currentUserId: typeof s.currentUserId === 'string' ? s.currentUserId : '',
+          currentUserName: typeof s.currentUserName === 'string' ? s.currentUserName : '',
+          currentRole: typeof s.currentRole === 'string' ? s.currentRole : 'EMPLOYEE',
+          currentUser: s.currentUser && typeof s.currentUser === 'object' ? s.currentUser : null,
+          darkMode: typeof s.darkMode === 'boolean' ? s.darkMode : false,
+          isDark: typeof s.isDark === 'boolean' ? s.isDark : false,
+        }
       },
     }
   )

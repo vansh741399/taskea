@@ -387,23 +387,57 @@ export async function GET(request: NextRequest) {
     // table reflects what HR actually paid the employee — it's the source of
     // truth. ERP local computation is only a fallback for the CURRENT month
     // where HR hasn't generated payroll yet.
+    //
+    // v25·0806-stale-payroll-fix: If a payroll record exists BUT was generated
+    // prematurely (e.g. HR generated it on July 1 for the whole month of July,
+    // capturing only 1-3 days of attendance), the snapshot is STALE and the
+    // HRMS app itself recomputes from the Attendance table on the fly when
+    // displaying the slip. To match the HRMS app's display behavior, we detect
+    // staleness by comparing payroll.presentDays vs the actual HRMS Attendance
+    // record count for the same month. If attendance has significantly more
+    // present days than the payroll snapshot, we treat the payroll as stale
+    // and fall through to local computation from attendance records.
     const hrmsPayroll = isHrmsDbConfigured()
       ? await fetchHrmsPayroll(hrmsEmp.employeeId, month, year)
       : null
 
-    // ─── 6b. If HRMS has a payroll record, use it directly ───
-    if (hrmsPayroll && hrmsPayroll.netSalary > 0) {
+    // Pre-fetch HRMS attendance for the month — used both for staleness check
+    // and as the fallback data source if payroll is stale.
+    const hrmsAttendance = isHrmsDbConfigured()
+      ? await fetchHrmsAttendanceByEmployee(
+          hrmsEmp.employeeId,
+          `${year}-${String(month).padStart(2, '0')}-01`,
+          `${year}-${String(month).padStart(2, '0')}-${String(daysInMonth).padStart(2, '0')}`
+        )
+      : []
+
+    // v25·0806-stale-payroll-fix: Staleness check.
+    // Count ACTUAL present days from HRMS Attendance (excluding weekly off,
+    // holiday, and absent records — same logic as the local computation below).
+    const hrmsAttPresentDays = hrmsAttendance.filter(a =>
+      !a.isWeeklyOff && !a.isHoliday && a.status !== 'absent' && a.checkIn
+    ).length
+
+    // If payroll says fewer present days than attendance actually has, the
+    // payroll record is stale (generated mid-month). Use attendance instead.
+    // We also require attendance to have at least 1 more day than payroll to
+    // avoid false positives from rounding.
+    const payrollIsStale = !!hrmsPayroll
+      && hrmsPayroll.netSalary > 0
+      && hrmsAttPresentDays > (hrmsPayroll.presentDays || 0) + 0.5
+
+    if (payrollIsStale) {
+      console.warn(
+        `[salary-slip] Stale HRMS payroll detected for ${hrmsEmp.employeeId} ${year}-${month}: ` +
+        `payroll.presentDays=${hrmsPayroll!.presentDays} but attendance has ${hrmsAttPresentDays} present days. ` +
+        `Falling through to local computation from HRMS Attendance.`
+      )
+    }
+
+    // ─── 6b. If HRMS has a FRESH payroll record, use it directly ───
+    if (hrmsPayroll && hrmsPayroll.netSalary > 0 && !payrollIsStale) {
       const monthName2 = ['January','February','March','April','May','June',
         'July','August','September','October','November','December'][month - 1]
-
-      // Also fetch HRMS attendance for context (optional)
-      const hrmsAttendance = isHrmsDbConfigured()
-        ? await fetchHrmsAttendanceByEmployee(
-            hrmsEmp.employeeId,
-            `${year}-${String(month).padStart(2, '0')}-01`,
-            `${year}-${String(month).padStart(2, '0')}-${String(daysInMonth).padStart(2, '0')}`
-          )
-        : []
 
       const employeeFromHrms = {
         id: hrmsEmp.id,
@@ -484,6 +518,35 @@ export async function GET(request: NextRequest) {
           hrmsAttendanceCount: hrmsAttendance.length,
         },
       })
+    }
+
+    // v25·0806-stale-payroll-fix: If payroll was stale, FORCE use of HRMS
+    // Attendance as the source of truth (instead of the empty ERP punch
+    // table). This happens when the ERP punch route's "punches.length === 0"
+    // branch wouldn't fire because punches might exist but the stale payroll
+    // would have short-circuited earlier.
+    if (payrollIsStale && hrmsAttendance.length > 0) {
+      // Synthesize effective punches from HRMS attendance — same logic as
+      // the existing fallback below, but forced because we know the payroll
+      // is stale.
+      effectivePunches = hrmsAttendance
+        .filter(a => !a.isWeeklyOff && !a.isHoliday && a.status !== 'absent' && a.checkIn)
+        .map(a => {
+          const dateObj = new Date(a.date)
+          const istDateStr = istDateString(dateObj)
+          const [inH, inM] = a.checkIn!.split(':').map(s => parseInt(s) || 0)
+          const punchIn = new Date(`${istDateStr}T${String(inH).padStart(2,'0')}:${String(inM).padStart(2,'0')}:00+05:30`)
+          let punchOut: Date | null = null
+          if (a.checkOut) {
+            const [outH, outM] = a.checkOut.split(':').map(s => parseInt(s) || 0)
+            punchOut = new Date(`${istDateStr}T${String(outH).padStart(2,'0')}:${String(outM).padStart(2,'0')}:00+05:30`)
+          }
+          let status = 'PRESENT'
+          if (a.lateEntry) status = 'LATE'
+          else if (a.earlyOut) status = 'EARLY_OUT'
+          else if (a.halfDay) status = 'HALF_DAY'
+          return { punchIn, punchOut, status }
+        })
     }
 
     // ─── 6c. NO HRMS PAYROLL — compute locally from ERP punches ───

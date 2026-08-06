@@ -7,7 +7,12 @@ import { useState } from 'react'
 export function LaxreeLeaveManagement() {
   const { currentRole, currentUserId, addToast } = useWorkflowStore()
   const queryClient = useQueryClient()
-  const isAdmin = currentRole === 'ADMIN'
+  // v25·0806-leave-approval: Founder, Admin, and Director (Samarth Sir) can
+  // approve/reject leaves. Previously only ADMIN had this power, which meant
+  // the founder and director couldn't action leave requests. Now all three
+  // roles see the Approve/Reject buttons and the action API accepts them.
+  const canApprove = currentRole === 'ADMIN' || currentRole === 'FOUNDER' || currentRole === 'DIRECTOR'
+  const isAdmin = canApprove // keep variable name for minimal diff downstream
 
   const [filterStatus, setFilterStatus] = useState('PENDING')
   const [remarkMap, setRemarkMap] = useState<Record<string, string>>({})

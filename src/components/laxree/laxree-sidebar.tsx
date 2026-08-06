@@ -291,6 +291,8 @@ export function LaxreeSidebar() {
     // The ONLY difference: when the Founder navigates to Dashboard or All Tasks,
     // the data is STRICTLY filtered to tasks they assigned (no legacy NULL fallback,
     // so Founder sees ONLY their own assigned tasks and their progress).
+    // v25·0806-leave-approval: Founder also gets Leave Management with full
+    // approve/reject authority.
     sections = [
       { label: 'Founder Command Center', items: founderDashboard },
       { label: 'Weekly Review', items: adminWeeklyReview },
@@ -298,6 +300,7 @@ export function LaxreeSidebar() {
       { label: 'Task Management', items: taskMgmt },
       { label: 'Intelligence', items: intelligence },
       { label: 'Departments', items: [{ id: 'departments' as ActivePage, label: 'Departments', icon: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="3" width="8" height="8" rx="1" /><rect x="13" y="3" width="8" height="8" rx="1" /><rect x="3" y="13" width="8" height="8" rx="1" /><path d="M13 17h8M17 13v8" /></svg> }] },
+      { label: 'Leaves', items: [{ id: 'leaves' as ActivePage, label: 'Leave Management', icon: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" /><circle cx="9" cy="7" r="4" /><path d="M23 21v-2a4 4 0 0 0-3-3.87" /><path d="M16 3.13a4 4 0 0 1 0 7.75" /></svg>, badge: eaPendingLeaves > 0 ? <span className="nb nb-live">{eaPendingLeaves} Pending</span> : undefined }] },
       { label: 'Management', items: management },
     ]
   } else if (isDirector) {
@@ -306,6 +309,8 @@ export function LaxreeSidebar() {
     // The ONLY difference: when the Director navigates to Dashboard or All Tasks,
     // the data is filtered to tasks they assigned (plus legacy NULL-assignedBy tasks
     // that predate the assignedBy feature, so no historical data is hidden).
+    // v25·0806-leave-approval: Director (Samarth Sir) also gets Leave Management
+    // with full approve/reject authority.
     sections = [
       { label: 'Director Command Center', items: adminCEOCommandCenter },
       { label: 'Weekly Review', items: adminWeeklyReview },
@@ -313,6 +318,7 @@ export function LaxreeSidebar() {
       { label: 'Task Management', items: taskMgmt },
       { label: 'Intelligence', items: intelligence },
       { label: 'Departments', items: [{ id: 'departments' as ActivePage, label: 'Departments', icon: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="3" width="8" height="8" rx="1" /><rect x="13" y="3" width="8" height="8" rx="1" /><rect x="3" y="13" width="8" height="8" rx="1" /><path d="M13 17h8M17 13v8" /></svg> }] },
+      { label: 'Leaves', items: [{ id: 'leaves' as ActivePage, label: 'Leave Management', icon: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" /><circle cx="9" cy="7" r="4" /><path d="M23 21v-2a4 4 0 0 0-3-3.87" /><path d="M16 3.13a4 4 0 0 1 0 7.75" /></svg>, badge: eaPendingLeaves > 0 ? <span className="nb nb-live">{eaPendingLeaves} Pending</span> : undefined }] },
       { label: 'Management', items: management },
     ]
   } else if (isEmployee) {

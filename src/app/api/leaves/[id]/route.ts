@@ -18,6 +18,9 @@ export async function PATCH(
     }
 
     // Verify the approver is an ADMIN for approve/reject actions
+    // v25·0806-leave-approval: ALSO allow FOUNDER and DIRECTOR to approve/reject
+    // leaves. Previously only ADMIN could. Per business decision, the founder
+    // and director (Samarth Sir) need approval authority too.
     if (action === 'approve' || action === 'reject') {
       if (!approvedById) {
         return NextResponse.json({ error: 'approvedById is required for approve/reject actions' }, { status: 400 })
@@ -28,8 +31,9 @@ export async function PATCH(
         select: { id: true, role: true, name: true },
       })
 
-      if (!approver || approver.role !== 'ADMIN') {
-        return NextResponse.json({ error: 'Only ADMIN can approve or reject leaves' }, { status: 403 })
+      const canApprove = approver && ['ADMIN', 'FOUNDER', 'DIRECTOR'].includes(approver.role)
+      if (!canApprove) {
+        return NextResponse.json({ error: 'Only ADMIN, FOUNDER, or DIRECTOR can approve or reject leaves' }, { status: 403 })
       }
     }
 

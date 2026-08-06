@@ -1104,10 +1104,27 @@ export default function HomePage() {
     }
   }, [darkMode])
 
-  // v24·0625-refresh-fix: while persist hasn't rehydrated yet, render a tiny
+  // v25·0806-stuck-splash-fix: Safety timeout — if Zustand persist hasn't
+  // hydrated within 1.5 seconds (e.g. corrupted localStorage, older schema
+  // version, or browser bug), force _hasHydrated=true so the user is never
+  // left staring at the "LAXREE" splash placeholder forever. This is the
+  // root cause of the "dashboard logs me out" complaint — the app loads
+  // the splash and never advances past it.
+  useEffect(() => {
+    if (_hasHydrated) return
+    const t = setTimeout(() => {
+      // Force-flip the hydration flag so the login gate / dashboard renders
+      useWorkflowStore.getState().setHasHydrated(true)
+    }, 1500)
+    return () => clearTimeout(t)
+  }, [_hasHydrated])
+
+  // v25·0806-stuck-splash-fix: while persist hasn't rehydrated yet, render a tiny
   // neutral placeholder so we don't flash the login screen on every refresh.
   // This is only visible for ~1 frame on slow devices; on most clients it's
   // imperceptible because persist hydrates synchronously from localStorage.
+  // The 1.5s safety timeout above guarantees we never stay on this placeholder
+  // indefinitely even if hydration fails silently.
   if (!_hasHydrated) {
     return (
       <div style={{
