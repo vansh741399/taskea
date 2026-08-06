@@ -5,6 +5,12 @@ import {
   findHrmsEmployeeByHrmsId,
   findHrmsEmployeeByName,
 } from '@/lib/hrms-client'
+import {
+  upsertHrmsAttendanceRecord,
+  fetchHrmsEmployeeCodeByCuid,
+  computeDailyPunchSummary,
+  isHrmsDbWritable,
+} from '@/lib/hrms-db-write'
 
 // ════════════════════════════════════════════════════════════════════════
 // v25·0806-fix — PUNCH-IN / PUNCH-OUT with 100m Geofencing + AUTO OFFICE
@@ -51,6 +57,91 @@ function haversineDistance(lat1: number, lng1: number, lat2: number, lng2: numbe
     Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLng / 2) ** 2
   const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))
   return Math.round(R * c)
+}
+
+// ─── v25·0806-fix: HRMS SYNC HELPER ───
+// After each punch action, sync the consolidated daily attendance to the
+// HRMS Attendance table. This is fire-and-forget: if it fails, we log
+// the error but the ERP punch itself still succeeds. The user's punch
+// is the source of truth — HRMS sync is a downstream consumer.
+//
+// SAFETY:
+//   - UPSERT only (insert if absent, update if present for same emp+date)
+//   - NEVER deletes
+//   - Only touches the SPECIFIC date being synced (today, by IST)
+//   - If HRMS_DATABASE_URL is not set, this is a no-op
+const IST_OFFSET_MS = (5 * 60 + 30) * 60 * 1000
+
+async function syncTodayToHrms(userId: string, hrmsCuid: string | null): Promise<void> {
+  if (!isHrmsDbWritable()) return // no-op if HRMS DB not configured
+  if (!hrmsCuid) {
+    console.warn('[PUNCH] Skipping HRMS sync — user has no hrmsId')
+    return
+  }
+
+  try {
+    // 1. Resolve HRMS employeeId code (e.g. "EMP-021") from the HRMS cuid
+    const hrmsEmpCode = await fetchHrmsEmployeeCodeByCuid(hrmsCuid)
+    if (!hrmsEmpCode) {
+      console.warn(`[PUNCH] HRMS sync skipped — no Employee found with id=${hrmsCuid}`)
+      return
+    }
+
+    // 2. Compute IST "today" range to fetch all of today's ERP punches
+    const now = new Date()
+    const ist = new Date(now.getTime() + IST_OFFSET_MS)
+    const y = ist.getUTCFullYear()
+    const m = ist.getUTCMonth() + 1
+    const d = ist.getUTCDate()
+    const startUtcMs = Date.UTC(y, m - 1, d) - IST_OFFSET_MS
+    const endUtcMs = Date.UTC(y, m - 1, d + 1) - IST_OFFSET_MS - 1
+
+    const todayPunches = await db.punchRecord.findMany({
+      where: {
+        userId,
+        punchIn: { gte: new Date(startUtcMs), lte: new Date(endUtcMs) },
+      },
+      select: { punchIn: true, punchOut: true, status: true },
+      orderBy: { punchIn: 'asc' },
+    })
+
+    if (todayPunches.length === 0) {
+      console.warn('[PUNCH] HRMS sync skipped — no punches found for today (race?)')
+      return
+    }
+
+    // 3. Compute consolidated daily summary (earliest in, latest out, status)
+    const summary = computeDailyPunchSummary(
+      todayPunches.map(p => ({
+        punchIn: new Date(p.punchIn),
+        punchOut: p.punchOut ? new Date(p.punchOut) : null,
+      }))
+    )
+
+    // 4. UPSERT to HRMS Attendance table
+    const result = await upsertHrmsAttendanceRecord({
+      hrmsEmployeeId: hrmsEmpCode,
+      date: now,
+      checkIn: summary.checkIn,
+      checkOut: summary.checkOut,
+      totalHours: summary.totalHours,
+      overtimeHours: summary.overtimeHours,
+      status: summary.status,
+      lateEntry: summary.lateEntry,
+      earlyOut: summary.earlyOut,
+      halfDay: summary.halfDay,
+      remarks: `Synced from ERP punch at ${now.toISOString()}`,
+    })
+
+    if (result.success) {
+      console.log(`[PUNCH] HRMS sync OK — ${result.mode} attendance record ${result.id} for ${hrmsEmpCode} (status=${summary.status}, in=${summary.checkIn?.toISOString()}, out=${summary.checkOut?.toISOString() || 'null'})`)
+    } else {
+      console.error(`[PUNCH] HRMS sync FAILED for ${hrmsEmpCode}: ${result.error}`)
+    }
+  } catch (e: any) {
+    // Never let HRMS sync break the ERP punch
+    console.error('[PUNCH] HRMS sync threw:', e?.message || e)
+  }
 }
 
 export async function POST(request: NextRequest) {
@@ -252,6 +343,12 @@ export async function POST(request: NextRequest) {
         },
       })
 
+      // ─── v25·0806-fix: Sync today's consolidated attendance to HRMS ───
+      // Fire-and-forget — never blocks the punch response. If HRMS DB is
+      // unreachable, the ERP punch still succeeds and the next punch will
+      // retry the sync (UPSERT means it'll just overwrite the partial record).
+      syncTodayToHrms(user.id, user.hrmsId).catch(() => {})
+
       return NextResponse.json({
         success: true,
         message: `Punched in successfully at ${office.name}`,
@@ -304,6 +401,11 @@ export async function POST(request: NextRequest) {
     const workDurationMs = now.getTime() - activePunch.punchIn.getTime()
     const workHours = Math.floor(workDurationMs / (1000 * 60 * 60))
     const workMinutes = Math.floor((workDurationMs % (1000 * 60 * 60)) / (1000 * 60))
+
+    // ─── v25·0806-fix: Sync today's consolidated attendance to HRMS ───
+    // After punch-out, recompute the day's summary (earliest in, latest out)
+    // and push the final record to HRMS. Fire-and-forget.
+    syncTodayToHrms(user.id, user.hrmsId).catch(() => {})
 
     return NextResponse.json({
       success: true,
