@@ -651,6 +651,10 @@ export async function GET(request: NextRequest) {
         totalPunches: effectivePunches.length,
         erpPunchCount: punches.length,
         hrmsAttendanceUsed: punches.length === 0 && effectivePunches.length > 0,
+        // v25·0806-stale-payroll-fix: include HRMS attendance count for stale
+        // payroll fallback (when payroll exists but is stale, we use HRMS
+        // Attendance as the source — surface the count for visibility).
+        hrmsAttendanceCount: hrmsAttendance.length,
         presentDays,
         paidLeaveDays,
         payableDays,
