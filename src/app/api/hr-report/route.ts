@@ -150,11 +150,11 @@ function hrmsAttendanceToPunches(records: HrmsAttendanceRecord[]): PunchLike[] {
 // Merges in: salary, joiningDate, firm, employmentType, bank details,
 // PAN/Aadhaar, shift timings — all from HRMS (single source of truth).
 //
-// SCORING (unchanged from v25·0801):
-//   HR Score = 2 (multiplier)
-//   Base Score = Total Presents × HR Score
+// SCORING (v25·0806-out-of-10):
+//   Max Score = 10 (out of 10)
+//   Base Score = 10 (always starts at 10/10)
 //   Deductions per marking scheme (see code below)
-//   Overall Score = Base Score - Deductions
+//   Overall Score = max(0, 10 - Deductions) — capped between 0 and 10
 //   If Overall Score < 7 → marked RED
 //
 // EXCEL EXPORT (WPS-Office-compatible):
@@ -167,7 +167,9 @@ function hrmsAttendanceToPunches(records: HrmsAttendanceRecord[]): PunchLike[] {
 //   LibreOffice, Google Sheets.
 // ════════════════════════════════════════════════════════════════════════
 
-const HR_SCORE_MULTIPLIER = 2
+// v25·0806-out-of-10: Score is now OUT OF 10 (was Presents × 2).
+// User criteria: start at 10, apply same -1 and -2 deductions.
+const MAX_SCORE = 10
 const SHIFT_START_HOUR = 10 // 10:00 AM IST
 const SHIFT_END_HOUR = 19   // 7:00 PM IST
 const LATE_THRESHOLD_MINUTES = 15 // 15 min grace period
@@ -382,18 +384,20 @@ export async function GET(request: NextRequest) {
             : (hrmsLeavesMerged.length > 0 ? 'no-erp-punches-leaves-only' : 'no-erp-punches'))
         : 'ok',
       scoringConfig: {
-        hrScoreMultiplier: HR_SCORE_MULTIPLIER,
+        maxScore: MAX_SCORE,
+        baseScore: MAX_SCORE,
         shiftStart: `${SHIFT_START_HOUR}:00 AM IST`,
         shiftEnd: `${SHIFT_END_HOUR}:00 PM IST`,
         lateGracePeriod: `${LATE_THRESHOLD_MINUTES} min`,
         lowScoreThreshold: 7,
         weekend: 'Saturday + Sunday excluded',
+        scoringType: 'out-of-10',
       },
       summary: {
         totalEmployees: report.length,
         totalPresents: report.reduce((s, r) => s + r.totalPresents, 0),
         avgScore: report.length > 0
-          ? Math.round(report.reduce((s, r) => s + r.overallScore, 0) / report.length)
+          ? Number((report.reduce((s, r) => s + r.overallScore, 0) / report.length).toFixed(1))
           : 0,
         lowScoreCount: report.filter(r => r.isLowScore).length,
         totalFullDayLeaves: report.reduce((s, r) => s + r.fullDayLeaves, 0),
@@ -523,12 +527,14 @@ async function buildSelfReport(userId: string, month: number, year: number) {
           : (hrmsLeavesMerged.length > 0 ? 'no-erp-punches-leaves-only' : 'no-erp-punches'))
       : 'ok',
     scoringConfig: {
-      hrScoreMultiplier: HR_SCORE_MULTIPLIER,
+      maxScore: MAX_SCORE,
+      baseScore: MAX_SCORE,
       shiftStart: `${SHIFT_START_HOUR}:00 AM IST`,
       shiftEnd: `${SHIFT_END_HOUR}:00 PM IST`,
       lateGracePeriod: `${LATE_THRESHOLD_MINUTES} min`,
       lowScoreThreshold: 7,
       weekend: 'Saturday + Sunday excluded',
+      scoringType: 'out-of-10',
     },
     employee: empReport,
     hrmsSyncedAt: hrmsEmployees.length > 0 ? new Date().toISOString() : null,
@@ -700,8 +706,11 @@ function computeEmployeeReport(
     }
   }
 
-  // ─── Calculate Overall Score ───
-  const baseScore = totalPresents * HR_SCORE_MULTIPLIER
+  // ─── Calculate Overall Score (out of 10) ───
+  // v25·0806-out-of-10: Scoring is now OUT OF 10.
+  //   Start at 10, apply deductions per the marking scheme.
+  //   Final score is clamped between 0 and 10.
+  const baseScore = MAX_SCORE // Always starts at 10/10
   let deductions = 0
   const deductionDetails: string[] = []
 
@@ -715,7 +724,8 @@ function computeEmployeeReport(
   if (uninformedLeaves > 3) { deductions += 2; deductionDetails.push('-2 (uninformed > 3)') }
   if (halfDayLeaves > 4) { deductions += 2; deductionDetails.push('-2 (half days > 4)') }
 
-  const overallScore = Math.max(0, baseScore - deductions)
+  // Cap deductions: never let score go below 0 or above 10
+  const overallScore = Math.max(0, Math.min(MAX_SCORE, baseScore - deductions))
   const isLowScore = overallScore < 7
 
   // ─── HRMS enrichment (salary, joining date, bank, etc.) ───
@@ -769,15 +779,16 @@ function computeEmployeeReport(
     earlyPunchDetails,
     uninformedDates,
 
-    // Scoring
+    // Scoring (out of 10)
     totalPresents,
-    hrScore: HR_SCORE_MULTIPLIER,
+    maxScore: MAX_SCORE,
     baseScore,
     deductions,
     deductionDetails,
     overallScore,
+    overallScoreOutOf: MAX_SCORE,
     isLowScore,
-    status: overallScore >= 7 ? 'GOOD' : 'LOW',
+    status: overallScore >= 8 ? 'GOOD' : overallScore >= 7 ? 'AVERAGE' : 'LOW',
 
     // HRMS enrichment
     hrms: hrmsData,
@@ -806,10 +817,9 @@ function buildAdminExcelResponse(report: any[], filters: { month: number; year: 
     'Early Goings': r.earlyGoings,
     'Late/Early Total': r.lateComingsEarlyGoings,
     'Total Presents': r.totalPresents,
-    'HR Score': r.hrScore,
-    'Base Score': r.baseScore,
+    'Max Score': r.maxScore,
     'Deductions': r.deductions,
-    'Overall Score': r.overallScore,
+    'Overall Score (out of 10)': r.overallScore,
     'Status': r.status,
     'HRMS ID': r.hrms?.hrmsEmployeeId || '',
     'Joining Date': r.hrms?.joiningDate ? new Date(r.hrms.joiningDate).toLocaleDateString('en-IN') : '',
@@ -818,8 +828,8 @@ function buildAdminExcelResponse(report: any[], filters: { month: number; year: 
   ws1['!cols'] = [
     { wch: 6 }, { wch: 22 }, { wch: 25 }, { wch: 12 }, { wch: 12 },
     { wch: 10 }, { wch: 10 }, { wch: 15 }, { wch: 10 }, { wch: 10 },
-    { wch: 12 }, { wch: 12 }, { wch: 10 }, { wch: 10 }, { wch: 12 },
-    { wch: 12 }, { wch: 8 }, { wch: 12 }, { wch: 14 },
+    { wch: 12 }, { wch: 12 }, { wch: 10 }, { wch: 12 },
+    { wch: 18 }, { wch: 8 }, { wch: 12 }, { wch: 14 },
   ]
   // Freeze top row (header) — WPS-compatible
   ws1['!freeze'] = { xSplit: 0, ySplit: 1 }
@@ -868,12 +878,14 @@ function buildAdminExcelResponse(report: any[], filters: { month: number; year: 
   ]
   XLSX.utils.book_append_sheet(wb, ws2, 'Employee Master')
 
-  // Sheet 3: Scoring Rules
+  // Sheet 3: Scoring Rules (out of 10)
   const rulesData = [
-    { 'Rule': 'HR Score Multiplier', 'Value': HR_SCORE_MULTIPLIER, 'Description': 'Total Presents × HR Score = Base Score' },
+    { 'Rule': 'Max Score', 'Value': MAX_SCORE, 'Description': 'Score is OUT OF 10. Starts at 10, deductions applied per marking scheme.' },
+    { 'Rule': 'Base Score', 'Value': MAX_SCORE, 'Description': 'Every employee starts the month at 10/10' },
     { 'Rule': 'Late Coming Threshold', 'Value': `${SHIFT_START_HOUR}:${String(LATE_THRESHOLD_MINUTES).padStart(2,'0')} AM`, 'Description': 'Punch-in after this time = late' },
     { 'Rule': 'Early Going Threshold', 'Value': `${SHIFT_END_HOUR}:00 PM`, 'Description': 'Punch-out before this time = early' },
     { 'Rule': 'Low Score Threshold', 'Value': 7, 'Description': 'Scores below 7 are marked RED' },
+    { 'Rule': 'Score Formula', 'Value': '10 − Deductions', 'Description': 'Final score clamped between 0 and 10' },
     {},
     { 'Rule': '−1 Deductions', 'Value': '', 'Description': '' },
     { 'Rule': 'Leaves > 2', 'Value': -1, 'Description': 'If total leave days > 2 in a month' },
@@ -919,7 +931,7 @@ function buildAdminExcelResponse(report: any[], filters: { month: number; year: 
     'Month': `${month}/${year}`,
     'Location Filter': location,
     'Total Employees': report.length,
-    'HR Score Multiplier': HR_SCORE_MULTIPLIER,
+    'Scoring Type': 'Out of 10',
     'Low Score Threshold': 7,
     'HRMS Synced': report.some(r => r.hrms) ? 'Yes' : 'No',
   }]
@@ -969,10 +981,10 @@ function buildSelfExcelResponse(selfReport: any, month: number, year: number) {
     { 'Field': 'Early Goings', 'Value': emp.earlyGoings },
     { 'Field': 'Late/Early Total', 'Value': emp.lateComingsEarlyGoings },
     {},
-    { 'Field': '── SCORE ──', 'Value': '' },
-    { 'Field': 'Base Score (Presents × 2)', 'Value': emp.baseScore },
+    { 'Field': '── SCORE (OUT OF 10) ──', 'Value': '' },
+    { 'Field': 'Starting Score (Max)', 'Value': emp.maxScore || 10 },
     { 'Field': 'Deductions', 'Value': emp.deductions },
-    { 'Field': 'Overall Score', 'Value': emp.overallScore },
+    { 'Field': 'Overall Score (out of 10)', 'Value': emp.overallScore },
     { 'Field': 'Status', 'Value': emp.status },
     {},
     { 'Field': '── SALARY ──', 'Value': '' },
@@ -1020,12 +1032,14 @@ function buildSelfExcelResponse(selfReport: any, month: number, year: number) {
   ws3['!cols'] = [{ wch: 6 }, { wch: 22 }, { wch: 50 }]
   XLSX.utils.book_append_sheet(wb, ws3, 'Uninformed Dates')
 
-  // Sheet 4: Scoring Rules
+  // Sheet 4: Scoring Rules (out of 10)
   const rulesData = [
-    { 'Rule': 'HR Score Multiplier', 'Value': HR_SCORE_MULTIPLIER, 'Description': 'Total Presents × HR Score = Base Score' },
+    { 'Rule': 'Max Score', 'Value': MAX_SCORE, 'Description': 'Score is OUT OF 10. Starts at 10, deductions applied per marking scheme.' },
+    { 'Rule': 'Base Score', 'Value': MAX_SCORE, 'Description': 'Every employee starts the month at 10/10' },
     { 'Rule': 'Late Coming Threshold', 'Value': `${SHIFT_START_HOUR}:${String(LATE_THRESHOLD_MINUTES).padStart(2,'0')} AM`, 'Description': 'Punch-in after this time = late' },
     { 'Rule': 'Early Going Threshold', 'Value': `${SHIFT_END_HOUR}:00 PM`, 'Description': 'Punch-out before this time = early' },
     { 'Rule': 'Low Score Threshold', 'Value': 7, 'Description': 'Scores below 7 are marked RED' },
+    { 'Rule': 'Score Formula', 'Value': '10 − Deductions', 'Description': 'Final score clamped between 0 and 10' },
     {},
     { 'Rule': '−1 Deductions', 'Value': '', 'Description': '' },
     { 'Rule': 'Leaves > 2', 'Value': -1, 'Description': 'If total leave days > 2 in a month' },

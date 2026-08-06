@@ -126,7 +126,9 @@ export function LaxreeEmpHrReport() {
   }
 
   const isLow = emp.isLowScore
-  const scoreColor = isLow ? '#DC2626' : emp.overallScore >= 40 ? '#059669' : '#D97706'
+  const isAvg = !isLow && emp.overallScore < 8  // 7 = AVERAGE (yellow)
+  const isGood = !isLow && !isAvg               // 8-10 = GOOD (green)
+  const scoreColor = isLow ? '#DC2626' : isGood ? '#059669' : '#D97706'
 
   return (
     <>
@@ -277,21 +279,21 @@ export function LaxreeEmpHrReport() {
           </div>
           <div style={{ textAlign: 'right' }}>
             <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 1, opacity: 0.8, marginBottom: 6 }}>
-              🎯 Overall Score
+              🎯 Overall Score (out of 10)
             </div>
             <div style={{
               fontSize: 48, fontWeight: 900, lineHeight: 1,
-              color: isLow ? '#FCA5A5' : emp.overallScore >= 40 ? '#86EFAC' : '#FDE68A',
+              color: isLow ? '#FCA5A5' : isGood ? '#86EFAC' : '#FDE68A',
             }}>
-              {emp.overallScore}
+              {emp.overallScore}<span style={{ fontSize: 22, opacity: 0.7 }}>/10</span>
             </div>
             <div style={{
               display: 'inline-block', padding: '3px 12px', borderRadius: 12,
               fontSize: 11, fontWeight: 800, marginTop: 8,
-              background: isLow ? 'rgba(239,68,68,0.3)' : emp.overallScore >= 40 ? 'rgba(16,185,129,0.3)' : 'rgba(245,158,11,0.3)',
-              border: `1px solid ${isLow ? '#FCA5A5' : emp.overallScore >= 40 ? '#86EFAC' : '#FDE68A'}`,
+              background: isLow ? 'rgba(239,68,68,0.3)' : isGood ? 'rgba(16,185,129,0.3)' : 'rgba(245,158,11,0.3)',
+              border: `1px solid ${isLow ? '#FCA5A5' : isGood ? '#86EFAC' : '#FDE68A'}`,
             }}>
-              {isLow ? '🔴 LOW' : emp.overallScore >= 40 ? '✓ GOOD' : '⚠ AVERAGE'}
+              {isLow ? '🔴 LOW' : isGood ? '✓ GOOD' : '⚠ AVERAGE'}
             </div>
           </div>
         </div>
@@ -320,18 +322,17 @@ export function LaxreeEmpHrReport() {
       {/* Score Breakdown */}
       <div style={{
         background: '#fff', borderRadius: 12, padding: 16, marginBottom: 16,
-        border: `2px solid ${isLow ? '#EF4444' : '#10B981'}`,
+        border: `2px solid ${isLow ? '#EF4444' : isGood ? '#10B981' : '#F59E0B'}`,
         boxShadow: '0 2px 8px rgba(0,0,0,0.05)',
       }}>
         <div style={{ fontWeight: 800, fontSize: 14, color: '#1f2937', marginBottom: 12, display: 'flex', alignItems: 'center', gap: 8 }}>
-          🧮 Score Breakdown
+          🧮 Score Breakdown (out of 10)
         </div>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 10 }}>
+          <ScoreRow label="Starting Score (Max)" value={`10`} color="#6D28D9" />
           <ScoreRow label="Total Presents" value={`${emp.totalPresents} days`} color="#10B981" />
-          <ScoreRow label="HR Score Multiplier" value={`× ${emp.hrScore}`} color="#6D28D9" />
-          <ScoreRow label="Base Score" value={`= ${emp.baseScore}`} color="#0EA5E9" />
           <ScoreRow label="Deductions" value={`− ${emp.deductions}`} color={emp.deductions > 0 ? '#EF4444' : '#9CA3AF'} />
-          <ScoreRow label="Overall Score" value={`= ${emp.overallScore}`} color={scoreColor} bold />
+          <ScoreRow label="Overall Score" value={`${emp.overallScore} / 10`} color={scoreColor} bold />
         </div>
         {emp.deductionDetails.length > 0 && (
           <div style={{ marginTop: 12, padding: 10, background: '#FEF2F2', borderRadius: 8, border: '1px solid #FECACA' }}>
@@ -450,15 +451,15 @@ export function LaxreeEmpHrReport() {
         border: '2px solid #F59E0B',
       }}>
         <div style={{ fontWeight: 800, fontSize: 14, color: '#92400E', marginBottom: 12 }}>
-          📐 Marking Scheme
+          📐 Marking Scheme (Score out of 10)
         </div>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: 10 }}>
           <div style={{ background: '#fff', borderRadius: 8, padding: 10, border: '1px solid #FCD34D' }}>
-            <div style={{ fontWeight: 700, fontSize: 11, color: '#92400E', marginBottom: 6 }}>✅ Score Calculation</div>
+            <div style={{ fontWeight: 700, fontSize: 11, color: '#92400E', marginBottom: 6 }}>✅ Score Calculation (out of 10)</div>
             <div style={{ fontSize: 11, color: '#78350F', lineHeight: 1.6 }}>
-              Base = Presents × {scoringConfig.hrScoreMultiplier || 2}
-              <br />Overall = Base − Deductions
-              <br />🔴 Score &lt; {scoringConfig.lowScoreThreshold || 7} → marked RED
+              Max = 10 (start at 10/10)
+              <br />Overall = 10 − Deductions
+              <br />🔴 &lt; {scoringConfig.lowScoreThreshold || 7} → RED · ⚠ 7 = AVG · ✓ 8-10 = GOOD
             </div>
           </div>
           <div style={{ background: '#fff', borderRadius: 8, padding: 10, border: '1px solid #FCD34D' }}>
@@ -475,14 +476,14 @@ export function LaxreeEmpHrReport() {
           </div>
         </div>
         <div style={{ marginTop: 10, fontSize: 10, color: '#92400E', textAlign: 'center' }}>
-          Shift: {scoringConfig.shiftStart || '10:00 AM'} – {scoringConfig.shiftEnd || '7:00 PM'} · Grace: {scoringConfig.lateGracePeriod || '15 min'} · Sundays excluded
+          Shift: {scoringConfig.shiftStart || '10:00 AM'} – {scoringConfig.shiftEnd || '7:00 PM'} · Grace: {scoringConfig.lateGracePeriod || '15 min'} · Sat + Sun excluded
         </div>
       </div>
 
       <div style={{
         padding: 12, background: '#f3f4f6', borderRadius: 8, fontSize: 11, color: '#6B7280', textAlign: 'center',
       }}>
-        📥 Excel export includes 4 sheets: My HR Summary, Late-Early Details, Uninformed Dates, Scoring Rules · Opens in MS Excel, WPS Office, LibreOffice
+        📥 Excel export includes 4 sheets: My HR Summary, Late-Early Details, Uninformed Dates, Scoring Rules · Score is OUT OF 10 · Opens in MS Excel, WPS Office, LibreOffice
       </div>
     </>
   )

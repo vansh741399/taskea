@@ -5,13 +5,13 @@ import { useQuery } from '@tanstack/react-query'
 import { useWorkflowStore } from '@/stores/workflow-store'
 
 // ════════════════════════════════════════════════════════════════════════
-// v25·0806 — HR Report View (redesigned per user's uploaded format)
+// v25·0806-out-of-10 — HR Report View (redesigned per user's uploaded format)
 // ════════════════════════════════════════════════════════════════════════
 // Columns (exact match to uploaded image):
 //   S.No | Name | Designation | Full Day | Half Days | Uninformed |
 //   Late/Early | Total Presents | Overall Score | Status
-// Marking: Total Presents × 2 (HR Score) - Deductions = Overall Score
-// Red highlight if score < 7
+// Marking: 10/10 (start) - Deductions = Overall Score (out of 10)
+// Color thresholds: 8-10 GOOD (green) | 7 AVERAGE (yellow) | <7 LOW (red)
 // ════════════════════════════════════════════════════════════════════════
 
 const MONTHS = [
@@ -255,7 +255,7 @@ export function LaxreeHrReport() {
         }}>
           <SummaryCard label="Employees" value={summary.totalEmployees} icon="👥" color="#6D28D9" />
           <SummaryCard label="Total Presents" value={summary.totalPresents} icon="✅" color="#10B981" />
-          <SummaryCard label="Avg Score" value={summary.avgScore} icon="🎯" color="#F59E0B" />
+          <SummaryCard label="Avg Score /10" value={summary.avgScore} icon="🎯" color="#F59E0B" />
           <SummaryCard label="Low Score (<7)" value={summary.lowScoreCount} icon="🔴" color="#EF4444" />
           <SummaryCard label="Full Day Leaves" value={summary.totalFullDayLeaves} icon="🏖️" color="#0EA5E9" />
           <SummaryCard label="Half Days" value={summary.totalHalfDayLeaves} icon="🌗" color="#8B5CF6" />
@@ -320,6 +320,8 @@ export function LaxreeHrReport() {
             ) : (
               employees.map((emp: any, i: number) => {
                 const isLow = emp.isLowScore
+                const isAvg = !isLow && emp.overallScore < 8  // 7 = AVERAGE (yellow)
+                const isGood = !isLow && !isAvg               // 8-10 = GOOD (green)
                 const isAltRow = i % 2 === 1
 
                 return (
@@ -328,7 +330,7 @@ export function LaxreeHrReport() {
                     style={{
                       background: isLow
                         ? 'rgba(239,68,68,0.08)'
-                        : isAltRow ? '#f9fafb' : '#fff',
+                        : isAvg ? 'rgba(245,158,11,0.06)' : isAltRow ? '#f9fafb' : '#fff',
                       borderBottom: '1px solid #e5e7eb',
                     }}
                   >
@@ -357,13 +359,13 @@ export function LaxreeHrReport() {
                       textAlign: 'center',
                       fontWeight: 800,
                       fontSize: 16,
-                      color: isLow ? '#DC2626' : emp.overallScore >= 40 ? '#059669' : '#D97706',
-                      background: isLow ? 'rgba(239,68,68,0.15)' : 'transparent',
+                      color: isLow ? '#DC2626' : isGood ? '#059669' : '#D97706',
+                      background: isLow ? 'rgba(239,68,68,0.15)' : isAvg ? 'rgba(245,158,11,0.10)' : 'transparent',
                     }}>
-                      {emp.overallScore}
+                      <div style={{ fontSize: 18, lineHeight: 1.1 }}>{emp.overallScore}<span style={{ fontSize: 11, color: '#9CA3AF', fontWeight: 600 }}>/10</span></div>
                       {emp.deductions > 0 && (
-                        <div style={{ fontSize: 9, color: '#9CA3AF', fontWeight: 400 }}>
-                          (base {emp.baseScore} -{emp.deductions})
+                        <div style={{ fontSize: 9, color: '#9CA3AF', fontWeight: 400, marginTop: 2 }}>
+                          (10 −{emp.deductions})
                         </div>
                       )}
                     </td>
@@ -376,10 +378,10 @@ export function LaxreeHrReport() {
                         borderRadius: 12,
                         fontSize: 10,
                         fontWeight: 700,
-                        background: isLow ? '#EF4444' : emp.overallScore >= 40 ? '#10B981' : '#F59E0B',
+                        background: isLow ? '#EF4444' : isGood ? '#10B981' : '#F59E0B',
                         color: '#fff',
                       }}>
-                        {isLow ? '🔴 LOW' : emp.overallScore >= 40 ? '✓ GOOD' : '⚠ AVG'}
+                        {isLow ? '🔴 LOW' : isGood ? '✓ GOOD' : '⚠ AVG'}
                       </span>
                     </td>
                   </tr>
@@ -399,19 +401,19 @@ export function LaxreeHrReport() {
         border: '2px solid #F59E0B',
       }}>
         <div style={{ fontWeight: 800, fontSize: 14, color: '#92400E', marginBottom: 12, display: 'flex', alignItems: 'center', gap: 8 }}>
-          📐 Marking Scheme & Deduction Rules
+          📐 Marking Scheme & Deduction Rules (Score out of 10)
         </div>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 12 }}>
           <div style={{ background: '#fff', borderRadius: 8, padding: 12, border: '1px solid #FCD34D' }}>
             <div style={{ fontWeight: 700, fontSize: 12, color: '#92400E', marginBottom: 8 }}>
-              ✅ Score Calculation
+              ✅ Score Calculation (out of 10)
             </div>
             <div style={{ fontSize: 11, color: '#78350F', lineHeight: 1.6 }}>
-              <div><strong>HR Score Multiplier:</strong> {scoringConfig.hrScoreMultiplier || 2}</div>
-              <div><strong>Base Score</strong> = Total Presents × {scoringConfig.hrScoreMultiplier || 2}</div>
-              <div><strong>Overall Score</strong> = Base Score − Deductions</div>
+              <div><strong>Max Score:</strong> 10 (every employee starts at 10/10)</div>
+              <div><strong>Overall Score</strong> = 10 − Deductions</div>
+              <div><strong>Final score</strong> is clamped between 0 and 10</div>
               <div style={{ marginTop: 6, fontSize: 10, color: '#DC2626' }}>
-                🔴 Score &lt; 7 → marked RED
+                🔴 Score &lt; 7 → marked RED &nbsp;·&nbsp; ⚠ 7 = AVG &nbsp;·&nbsp; ✓ 8-10 = GOOD
               </div>
             </div>
           </div>
@@ -444,7 +446,7 @@ export function LaxreeHrReport() {
         <div style={{ marginTop: 12, fontSize: 10, color: '#92400E', textAlign: 'center' }}>
           📊 Shift: {scoringConfig.shiftStart || '10:00 AM'} – {scoringConfig.shiftEnd || '7:00 PM'} ·
           Grace: {scoringConfig.lateGracePeriod || '15 min'} ·
-          Sundays excluded from uninformed count
+          Saturday + Sunday excluded from uninformed count
         </div>
       </div>
 
@@ -456,8 +458,8 @@ export function LaxreeHrReport() {
         color: '#6B7280',
         textAlign: 'center',
       }}>
-        📥 Excel export includes 4 sheets: HR Report (main), Scoring Rules, Location Summary, Report Info ·
-        Marking scheme auto-applied per the uploaded format
+        📥 Excel export includes 5 sheets: HR Report, Employee Master, Scoring Rules, Location Summary, Report Info ·
+        Score is OUT OF 10 (start at 10, deductions applied per marking scheme)
       </div>
     </>
   )
