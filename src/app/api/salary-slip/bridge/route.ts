@@ -75,9 +75,14 @@ const LATE_THRESHOLD_MIN = SHIFT_START_HOUR * 60 + LATE_THRESHOLD_MINUTES
 const SHIFT_END_MIN = SHIFT_END_HOUR * 60
 const WEEKEND_DAYS = new Set([0, 6]) // Sun + Sat
 
-// ─── Firm directory (matches HRMS SalarySlipGenerator firm data) ───
-// Source: HRMS app's firm config (LAPL/LRSL/SI). Hardcoded here so the
-// ERP doesn't need an extra round-trip to HRMS for firm details.
+// ─── Firm directory (matches HRMS `Firm` table — verified 2026-08-06) ───
+// Source: HRMS DB `Firm` table. Hardcoded here so the ERP doesn't need an
+// extra round-trip to HRMS for firm details. The names below are the EXACT
+// legal entity names as stored in HRMS — used on the salary slip letterhead.
+//
+// IMPORTANT: previous version had WRONG names (e.g. LAPL was "Laxree Associate
+// Projects Pvt. Ltd." but should be "LAXREE AMENITIES PVT LTD"). Fixed per
+// founder request. SDF firm was also missing entirely — now added.
 const FIRM_DIRECTORY: Record<string, {
   name: string
   code: string
@@ -87,28 +92,36 @@ const FIRM_DIRECTORY: Record<string, {
   logo: string
 }> = {
   LAPL: {
-    name: 'Laxree Associate Projects Pvt. Ltd.',
+    name: 'LAXREE AMENITIES PVT LTD',
     code: 'LAPL',
-    address: 'Laxree Associate Projects Pvt. Ltd., Ajmer, Rajasthan',
-    phone: '+91 98290 00000',
+    address: 'Plot No. 1 & 2, Harbilas Sharda Marg, Civil Lines, Ajmer, Rajasthan 305001',
+    phone: '+91 92516 83663',
     email: 'hr@laxree.com',
-    logo: '/logos/lapl-logo.png',
+    logo: '/laxree-logo.png',
   },
   LRSL: {
-    name: 'Laxree Retail Solutions Pvt. Ltd.',
+    name: 'LAXREE ROOFING SOLUTION',
     code: 'LRSL',
-    address: 'Laxree Retail Solutions Pvt. Ltd., Ajmer, Rajasthan',
-    phone: '+91 98290 00000',
+    address: 'Plot No. 1 & 2, Harbilas Sharda Marg, Civil Lines, Ajmer, Rajasthan 305001',
+    phone: '+91 92516 83663',
     email: 'hr@laxree.com',
-    logo: '/logos/lrsl-logo.png',
+    logo: '/laxree-logo.png',
   },
   SI: {
-    name: 'Shubham Industries',
+    name: 'SMARTH INTERNATIONAL',
     code: 'SI',
-    address: 'Shubham Industries, Ajmer, Rajasthan',
-    phone: '+91 98290 00000',
+    address: 'Plot No. 1 & 2, Harbilas Sharda Marg, Civil Lines, Ajmer, Rajasthan 305001',
+    phone: '+91 92516 83663',
     email: 'hr@laxree.com',
-    logo: '/logos/si-logo.png',
+    logo: '/laxree-logo.png',
+  },
+  SDF: {
+    name: 'SANGRAH DECOR & FURNITURE',
+    code: 'SDF',
+    address: 'Plot No. 1 & 2, Harbilas Sharda Marg, Civil Lines, Ajmer, Rajasthan 305001',
+    phone: '+91 92516 83663',
+    email: 'hr@laxree.com',
+    logo: '/laxree-logo.png',
   },
 }
 

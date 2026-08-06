@@ -268,11 +268,7 @@ export function LaxreeSidebar() {
       id: 'dashboard', label: 'Founder Dashboard',
       icon: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="3" width="7" height="7" rx="1" /><rect x="14" y="3" width="7" height="7" rx="1" /><rect x="14" y="14" width="7" height="7" rx="1" /><rect x="3" y="14" width="7" height="7" rx="1" /></svg>,
     },
-    {
-      id: 'executive', label: 'Executive View',
-      icon: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M22 12h-4l-3 9L9 3l-3 9H2" /></svg>,
-      badge: <span className="nb nb-new">FOUNDER</span>,
-    },
+    // v25·0806: Executive View removed from FOUNDER sidebar per founder request.
   ]
 
   const directorTasks: NavItem[] = [
@@ -286,22 +282,31 @@ export function LaxreeSidebar() {
   let sections: { label: string; items: NavItem[] }[]
 
   if (isFounder) {
-    // FOUNDER gets the SAME rich sidebar as ADMIN — same Dashboard, Executive View,
-    // Monday Meeting, Scorecard, All Tasks, Analytics, Departments, Team, etc.
-    // The ONLY difference: when the Founder navigates to Dashboard or All Tasks,
-    // the data is STRICTLY filtered to tasks they assigned (no legacy NULL fallback,
-    // so Founder sees ONLY their own assigned tasks and their progress).
-    // v25·0806-leave-approval: Founder also gets Leave Management with full
-    // approve/reject authority.
+    // FOUNDER sidebar — streamlined per founder request:
+    //   • Removed: Monday Meeting (Weekly Review), Executive View, Categories
+    //   • HR Report moved ABOVE Scorecard (founder wants them adjacent)
+    // Founder still gets: Dashboard, HR Report, Scorecard, All Tasks, Analytics,
+    // Departments, Leave Management, Team Members, User Management.
+    // v25·0806-leave-approval: Founder has full Leave Management authority.
+    const founderHrReport: NavItem[] = [
+      {
+        id: 'hr-report', label: 'HR Report',
+        icon: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><polyline points="14 2 14 8 20 8" /><line x1="12" y1="18" x2="12" y2="12" /><line x1="9" y1="18" x2="9" y2="15" /><line x1="15" y1="18" x2="15" y2="13" /></svg>,
+        badge: <span className="nb nb-new">NEW</span>,
+      },
+    ]
+    // FOUNDER-specific Management list — Categories removed per founder request.
+    // (Other roles still see Categories via the shared `management` array.)
+    const founderManagement: NavItem[] = management.filter(item => item.id !== 'categories' && item.id !== 'hr-report')
     sections = [
       { label: 'Founder Command Center', items: founderDashboard },
-      { label: 'Weekly Review', items: adminWeeklyReview },
+      { label: 'HR Report', items: founderHrReport },
       { label: 'Scorecard', items: adminScorecard },
       { label: 'Task Management', items: taskMgmt },
       { label: 'Intelligence', items: intelligence },
       { label: 'Departments', items: [{ id: 'departments' as ActivePage, label: 'Departments', icon: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="3" width="8" height="8" rx="1" /><rect x="13" y="3" width="8" height="8" rx="1" /><rect x="3" y="13" width="8" height="8" rx="1" /><path d="M13 17h8M17 13v8" /></svg> }] },
       { label: 'Leaves', items: [{ id: 'leaves' as ActivePage, label: 'Leave Management', icon: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" /><circle cx="9" cy="7" r="4" /><path d="M23 21v-2a4 4 0 0 0-3-3.87" /><path d="M16 3.13a4 4 0 0 1 0 7.75" /></svg>, badge: eaPendingLeaves > 0 ? <span className="nb nb-live">{eaPendingLeaves} Pending</span> : undefined }] },
-      { label: 'Management', items: management },
+      { label: 'Management', items: founderManagement },
     ]
   } else if (isDirector) {
     // DIRECTOR gets the SAME rich sidebar as ADMIN — same Dashboard, Executive View,

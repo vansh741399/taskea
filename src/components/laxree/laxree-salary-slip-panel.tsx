@@ -130,6 +130,8 @@ export function LaxreeSalarySlipPanel() {
           <span class="label">Department :</span><span class="value">${employee.department || firm.code || 'N/A'}</span>
           <span class="label">Pay Period :</span><span class="value">${monthName} ${year}</span>
           <span class="label">Location :</span><span class="value">${employee.location || 'N/A'}</span>
+          <span class="label">Monthly Salary :</span><span class="value" style="font-weight:700;color:#059669;">${payroll.monthlySalary ? '₹ ' + Number(payroll.monthlySalary).toLocaleString('en-IN') : 'N/A'}</span>
+          <span class="label">Per Day Rate :</span><span class="value" style="font-weight:700;color:#059669;">${payroll.perDayRate ? '₹ ' + Number(payroll.perDayRate).toLocaleString('en-IN') : 'N/A'}</span>
           <span class="label">Employee Address :</span><span class="value">${employee.address || employee.location || 'N/A'}</span>
           <span class="label">Employee Phone no :</span><span class="value">${employee.mobile || 'N/A'}</span>
           <span class="label">Employee Email ID :</span><span class="value">${employee.email || 'N/A'}</span>
@@ -261,6 +263,7 @@ export function LaxreeSalarySlipPanel() {
               {/* ─── Quick stats summary ─── */}
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 8, marginBottom: 16 }}>
                 <SalaryStatTile label="Net Salary" value={`₹${payroll.netSalary.toLocaleString('en-IN')}`} bg="linear-gradient(135deg, #FEF3C7, #FDE68A)" color="#92400E" big />
+                <SalaryStatTile label="Monthly Salary" value={payroll.monthlySalary ? `₹${Number(payroll.monthlySalary).toLocaleString('en-IN')}` : '—'} bg="linear-gradient(135deg, #EDE9FE, #DDD6FE)" color="#6D28D9" />
                 <SalaryStatTile label="Gross Salary" value={`₹${payroll.grossSalary.toLocaleString('en-IN')}`} bg="var(--green-l)" color="var(--green)" />
                 <SalaryStatTile label="Total Earnings" value={`₹${totalEarningsCalc.toLocaleString('en-IN')}`} bg="var(--blue-l)" color="var(--blue)" />
                 <SalaryStatTile label="Total Deductions" value={`₹${(payroll.totalDeductions || 0).toLocaleString('en-IN')}`} bg="var(--red-l)" color="var(--red)" />
@@ -327,6 +330,10 @@ export function LaxreeSalarySlipPanel() {
                   <span style={{ fontSize: 11 }}>{monthName} {year}</span>
                   <span style={{ fontWeight: 600, color: '#1E3A5F', fontSize: 11 }}>Location :</span>
                   <span style={{ fontSize: 11 }}>{employee.location || 'N/A'}</span>
+                  <span style={{ fontWeight: 600, color: '#1E3A5F', fontSize: 11 }}>Monthly Salary :</span>
+                  <span style={{ fontSize: 11, fontWeight: 700, color: '#059669' }}>{payroll.monthlySalary ? `₹ ${Number(payroll.monthlySalary).toLocaleString('en-IN')}` : 'N/A'}</span>
+                  <span style={{ fontWeight: 600, color: '#1E3A5F', fontSize: 11 }}>Per Day Rate :</span>
+                  <span style={{ fontSize: 11, fontWeight: 700, color: '#059669' }}>{payroll.perDayRate ? `₹ ${Number(payroll.perDayRate).toLocaleString('en-IN')}` : 'N/A'}</span>
                   <span style={{ fontWeight: 600, color: '#1E3A5F', fontSize: 11 }}>Employee Address :</span>
                   <span style={{ fontSize: 11 }}>{employee.address || employee.location || 'N/A'}</span>
                   <span style={{ fontWeight: 600, color: '#1E3A5F', fontSize: 11 }}></span>

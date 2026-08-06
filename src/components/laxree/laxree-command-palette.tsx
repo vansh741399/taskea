@@ -16,10 +16,15 @@ const COMMANDS: Array<{ id: string; label: string; section: string; icon: string
   { id: 'categories', label: 'Categories', section: 'Navigation', icon: '📁' },
   { id: 'leaves', label: 'Leave Management', section: 'Navigation', icon: '🏖️' },
   { id: 'employee-dashboard', label: 'My Dashboard', section: 'Navigation', icon: '👤' },
+  { id: 'hr-report', label: 'HR Report', section: 'Navigation', icon: '📊' },
 
 
   { id: 'monday', label: 'Monday Meeting', section: 'Navigation', icon: '📅' },
 ]
+
+// v25·0806: Pages the FOUNDER no longer wants in the command palette
+// (matched with the sidebar where they were also removed).
+const FOUNDER_HIDDEN_IDS = new Set(['executive', 'monday', 'categories'])
 
 export function LaxreeCommandPalette() {
   const { cmdPaletteOpen, setCmdPaletteOpen, setActivePage, setCreateTaskOpen, currentRole } = useWorkflowStore()
@@ -29,8 +34,10 @@ export function LaxreeCommandPalette() {
   const inputRef = useRef<HTMLInputElement>(null)
 
   const filtered = COMMANDS.filter(c =>
-    c.label.toLowerCase().includes(search.toLowerCase()) ||
-    c.section.toLowerCase().includes(search.toLowerCase())
+    (c.label.toLowerCase().includes(search.toLowerCase()) ||
+    c.section.toLowerCase().includes(search.toLowerCase())) &&
+    // v25·0806: Hide Executive View, Monday Meeting, Categories from FOUNDER
+    !(currentRole === 'FOUNDER' && FOUNDER_HIDDEN_IDS.has(c.id))
   )
 
   // Add Create Task as first item if search matches — ONLY for EA/Admin
