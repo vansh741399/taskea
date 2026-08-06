@@ -278,13 +278,13 @@ export function LaxreeEmpHrReport() {
           </div>
           <div style={{ textAlign: 'right' }}>
             <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 1, opacity: 0.8, marginBottom: 6 }}>
-              🎯 Overall Score (out of 10)
+              🎯 Overall Score
             </div>
             <div style={{
-              fontSize: 48, fontWeight: 900, lineHeight: 1,
+              fontSize: 56, fontWeight: 900, lineHeight: 1,
               color: isLow ? '#FCA5A5' : isGood ? '#86EFAC' : '#FDE68A',
             }}>
-              {emp.overallScore}<span style={{ fontSize: 22, opacity: 0.7 }}>/10</span>
+              {emp.overallScore}
             </div>
             <div style={{
               display: 'inline-block', padding: '3px 12px', borderRadius: 12,
@@ -325,13 +325,13 @@ export function LaxreeEmpHrReport() {
         boxShadow: '0 2px 8px rgba(0,0,0,0.05)',
       }}>
         <div style={{ fontWeight: 800, fontSize: 14, color: '#1f2937', marginBottom: 12, display: 'flex', alignItems: 'center', gap: 8 }}>
-          🧮 Score Breakdown (out of 10)
+          🧮 Score Breakdown
         </div>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 10 }}>
           <ScoreRow label="Starting Score (Max)" value={`10`} color="#6D28D9" />
           <ScoreRow label="Total Presents" value={`${emp.totalPresents} days`} color="#10B981" />
           <ScoreRow label="Deductions" value={`− ${emp.deductions}`} color={emp.deductions > 0 ? '#EF4444' : '#9CA3AF'} />
-          <ScoreRow label="Overall Score" value={`${emp.overallScore} / 10`} color={scoreColor} bold />
+          <ScoreRow label="Overall Score" value={`${emp.overallScore}`} color={scoreColor} bold />
         </div>
         {emp.deductionDetails.length > 0 && (
           <div style={{ marginTop: 12, padding: 10, background: '#FEF2F2', borderRadius: 8, border: '1px solid #FECACA' }}>

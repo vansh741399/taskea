@@ -341,7 +341,7 @@ export function LaxreeHrReport() {
                       color: isLow ? '#DC2626' : isGood ? '#059669' : '#D97706',
                       background: isLow ? 'rgba(239,68,68,0.15)' : isAvg ? 'rgba(245,158,11,0.10)' : 'transparent',
                     }}>
-                      <div style={{ fontSize: 18, lineHeight: 1.1 }}>{emp.overallScore}<span style={{ fontSize: 11, color: '#9CA3AF', fontWeight: 600 }}>/10</span></div>
+                      <div style={{ fontSize: 22, lineHeight: 1.1 }}>{emp.overallScore}</div>
                       {emp.deductions > 0 && (
                         <div style={{ fontSize: 9, color: '#9CA3AF', fontWeight: 400, marginTop: 2 }}>
                           (10 −{emp.deductions})
@@ -379,7 +379,7 @@ export function LaxreeHrReport() {
         color: '#6B7280',
         textAlign: 'center',
       }}>
-        📥 Excel export · Score is OUT OF 10 (start at 10, deductions applied per marking scheme)
+        📥 Excel export · Score represents achieved marks (out of 10)
       </div>
     </>
   )
@@ -406,7 +406,7 @@ const headerGroupStyle: React.CSSProperties = {
   color: '#fff',
   textTransform: 'uppercase',
   letterSpacing: 1,
-  borderRight: '1px solid #4a4a4a',
+  // v25·0806-cls: divider line between LOCATION / INFORMED LEAVES / SCORING removed per founder request
 }
 
 const headerCellStyle: React.CSSProperties = {
@@ -417,7 +417,7 @@ const headerCellStyle: React.CSSProperties = {
   color: '#fff',
   textTransform: 'uppercase',
   letterSpacing: 0.5,
-  borderRight: '1px solid #4a4a4a',
+  // v25·0806-cls: vertical divider lines removed per founder request
   whiteSpace: 'nowrap',
 }
 
@@ -426,7 +426,7 @@ function cellStyle(isLow: boolean): React.CSSProperties {
     padding: '8px 10px',
     fontSize: 12,
     color: isLow ? '#7F1D1D' : '#1f2937',
-    borderRight: '1px solid #e5e7eb',
+    // v25·0806-cls: vertical divider lines removed per founder request
     whiteSpace: 'nowrap',
   }
 }

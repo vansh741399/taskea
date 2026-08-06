@@ -16,6 +16,8 @@ import {
 } from '@/lib/hrms-db'
 import * as XLSX from 'xlsx'
 import ExcelJS from 'exceljs'
+import fs from 'fs'
+import path from 'path'
 
 // ════════════════════════════════════════════════════════════════════════
 // v25·0806-fix — IST TIMEZONE HELPERS (critical fix)
@@ -918,6 +920,9 @@ function computeEmployeeReport(
 async function buildAdminExcelResponse(report: any[], filters: { month: number; year: number; location: string }) {
   const { month, year, location } = filters
   const monthLabel = new Date(year, month - 1, 1).toLocaleDateString('en-IN', { month: 'long', year: 'numeric' })
+  const locationLabel = location && location !== 'all'
+    ? (location.charAt(0).toUpperCase() + location.slice(1))
+    : 'All Locations'
 
   // ─── Color palette ─────────────────────────────────────────────────────
   const C = {
@@ -935,7 +940,7 @@ async function buildAdminExcelResponse(report: any[], filters: { month: number; 
     borderLight: 'FFE5E7EB',
     white:       'FFFFFFFF',
     zebra:       'FFF9FAFB',
-    hdrBg:       'FF1F2937',   // dark slate header
+    hdrBg:       'FF1F2937',
     accentGold:  'FFF59E0B',
   }
 
@@ -952,11 +957,16 @@ async function buildAdminExcelResponse(report: any[], filters: { month: number; 
   wb.created = new Date()
 
   // ═══════════════════════════════════════════════════════════════════════
-  // SHEET 1: HR Report (single sheet, clean tabular layout)
+  // SHEET 1: HR Report — Professional layout with logo header
+  // Layout:
+  //   Rows 1-4: Logo (cols A-B) | Title block (cols C-N)
+  //   Row 5: spacer
+  //   Row 6: Table header
+  //   Row 7+: Data
   // ═══════════════════════════════════════════════════════════════════════
   const ws1 = wb.addWorksheet('HR Report', {
     properties: { defaultRowHeight: 18 },
-    views: [{ showGridLines: false, ySplit: 1 }],
+    views: [{ showGridLines: false, ySplit: 6 }],
   })
 
   // Define columns (Location, Firm, HRMS ID, Joining Date removed per founder request)
@@ -974,14 +984,100 @@ async function buildAdminExcelResponse(report: any[], filters: { month: number; 
     { key: 'presents',      header: 'Presents',           width: 8 },
     { key: 'maxScore',      header: 'Max Score',          width: 8 },
     { key: 'deductions',    header: 'Deductions',         width: 10 },
-    { key: 'score',         header: 'Score /10',          width: 10 },
+    { key: 'score',         header: 'Score',              width: 10 },
     { key: 'status',        header: 'Status',             width: 10 },
   ]
   ws1.columns = cols
 
-  // Row 1: Header row (clean — no banner/title/spacer rows above it)
-  const hdrRow = ws1.getRow(1)
-  hdrRow.height = 28
+  // ─── BRANDED HEADER ROWS 1-4 ───────────────────────────────────────────
+  // Logo image: rows 1-4 (4 rows tall), cols A-B (2 cols wide)
+  // Title block: cols C-N (merged) — split into:
+  //   Row 1-2: "LAXREE" small brand text (merged C1:N2)
+  //   Row 3: "HR REPORT" big title (merged C3:N3)
+  //   Row 4: "For the month of MONTH YEAR  ·  LOCATION" subtitle (merged C4:N4)
+
+  // Load logo (try multiple paths for Vercel/local compat)
+  let logoImageId: number | null = null
+  try {
+    const logoCandidates = [
+      path.join(process.cwd(), 'public', 'laxree-logo-excel.png'),
+      '/home/z/my-project/public/laxree-logo-excel.png',
+    ]
+    for (const logoPath of logoCandidates) {
+      try {
+        if (fs.existsSync(logoPath)) {
+          const imgBuf = fs.readFileSync(logoPath)
+          logoImageId = wb.addImage({ buffer: imgBuf as any, extension: 'png' })
+          break
+        }
+      } catch {}
+    }
+  } catch (e) {
+    console.warn('[hr-report] Could not load logo image:', e)
+  }
+
+  // Set row heights for the header band (rows 1-4)
+  ws1.getRow(1).height = 22
+  ws1.getRow(2).height = 22
+  ws1.getRow(3).height = 32
+  ws1.getRow(4).height = 22
+  ws1.getRow(5).height = 8 // spacer
+
+  // Brand background fill for the header band (rows 1-4, cols A-N)
+  const brandFill: any = { type: 'pattern', pattern: 'solid', fgColor: { argb: C.brandDark } }
+  for (let r = 1; r <= 4; r++) {
+    for (let c = 1; c <= cols.length; c++) {
+      const cell = ws1.getCell(r, c)
+      cell.fill = brandFill
+      cell.border = { top: { style: 'thin', color: { argb: C.brandDark } },
+                       left: { style: 'thin', color: { argb: C.brandDark } },
+                       bottom: { style: 'thin', color: { argb: C.brandDark } },
+                       right: { style: 'thin', color: { argb: C.brandDark } } }
+    }
+  }
+
+  // Place the logo image (rows 1-4, cols A-B)
+  if (logoImageId !== null) {
+    ws1.addImage(logoImageId, {
+      tl: { col: 0, row: 0 } as any,
+      br: { col: 2, row: 4 } as any,
+    })
+  }
+
+  // Title text in cols C-N (merged across all 12 remaining columns)
+  // Row 1-2: small "LAXREE" brand text (spaced letters for elegant look)
+  ws1.mergeCells(1, 3, 2, cols.length)
+  const brandCell = ws1.getCell(1, 3)
+  brandCell.value = 'L  A  X  R  E  E'
+  brandCell.font = { name: 'Calibri', size: 12, bold: true, color: { argb: C.brandLight } }
+  brandCell.alignment = { vertical: 'middle', horizontal: 'left', indent: 1 }
+  brandCell.fill = brandFill
+
+  // Row 3: "HR REPORT" big title
+  ws1.mergeCells(3, 3, 3, cols.length)
+  const titleCell = ws1.getCell(3, 3)
+  titleCell.value = 'HR REPORT'
+  titleCell.font = { name: 'Calibri', size: 28, bold: true, color: { argb: C.white } }
+  titleCell.alignment = { vertical: 'middle', horizontal: 'left', indent: 1 }
+  titleCell.fill = brandFill
+
+  // Row 4: subtitle — month + location
+  ws1.mergeCells(4, 3, 4, cols.length)
+  const subCell = ws1.getCell(4, 3)
+  subCell.value = `For the month of  ${monthLabel}   ·   ${locationLabel}`
+  subCell.font = { name: 'Calibri', size: 11, bold: true, color: { argb: C.brandLight } }
+  subCell.alignment = { vertical: 'middle', horizontal: 'left', indent: 1 }
+  subCell.fill = brandFill
+
+  // Row 5: spacer (already set height 8 above) — leave as brand-colored strip
+  for (let c = 1; c <= cols.length; c++) {
+    ws1.getCell(5, c).fill = { type: 'pattern' as const, pattern: 'solid' as const, fgColor: { argb: C.brandLight } } as any
+  }
+
+  // ─── TABLE HEADER (Row 6) ──────────────────────────────────────────────
+  const HEADER_ROW = 6
+  const hdrRow = ws1.getRow(HEADER_ROW)
+  hdrRow.height = 32
   cols.forEach((c, i) => {
     const cell = hdrRow.getCell(i + 1)
     cell.value = c.header
@@ -991,8 +1087,8 @@ async function buildAdminExcelResponse(report: any[], filters: { month: number; 
     cell.border = borderAll
   })
 
-  // Data rows
-  let rowIdx = 2
+  // ─── DATA ROWS (Row 7+) ────────────────────────────────────────────────
+  let rowIdx = HEADER_ROW + 1
   report.forEach((r, i) => {
     const isZebra = i % 2 === 1
     const rowBg = isZebra ? C.zebra : C.white
@@ -1016,12 +1112,12 @@ async function buildAdminExcelResponse(report: any[], filters: { month: number; 
       presents: r.totalPresents,
       maxScore: r.maxScore,
       deductions: `− ${r.deductions}`,
-      score: `${r.overallScore} / 10`,
+      score: r.overallScore,
       status: r.status,
     }
     const dataRow = ws1.getRow(rowIdx)
     dataRow.values = rowData
-    dataRow.height = 18
+    dataRow.height = 20
 
     cols.forEach((c, ci) => {
       const cell = dataRow.getCell(ci + 1)
@@ -1029,7 +1125,6 @@ async function buildAdminExcelResponse(report: any[], filters: { month: number; 
       cell.alignment = alignCenter
       cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: rowBg } }
 
-      // Per-cell styling
       if (c.key === 'name') {
         cell.font = fontValBold
         cell.alignment = alignLeft
@@ -1053,18 +1148,29 @@ async function buildAdminExcelResponse(report: any[], filters: { month: number; 
     rowIdx++
   })
 
-  // Freeze the header row
-  ws1.views = [{ showGridLines: false, ySplit: 1 }]
+  // ─── FOOTER ROW ────────────────────────────────────────────────────────
+  const footerRow = rowIdx
+  ws1.mergeCells(footerRow, 1, footerRow, cols.length)
+  const footCell = ws1.getCell(footerRow, 1)
+  const generatedAt = new Date().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' })
+  footCell.value = `Generated on ${generatedAt} IST  ·  Laxree ERP  ·  Confidential — for internal use only`
+  footCell.font = { name: 'Calibri', size: 9, italic: true, color: { argb: C.textMuted } }
+  footCell.alignment = { vertical: 'middle', horizontal: 'center' }
+  footCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: C.brandLight } }
+  ws1.getRow(footerRow).height = 22
 
-  // Auto-filter on the header row (row 1)
+  // Freeze the header (everything above row 7 stays put when scrolling)
+  ws1.views = [{ showGridLines: false, ySplit: HEADER_ROW, xSplit: 0 }]
+
+  // Auto-filter on the table header row (row 6)
   ws1.autoFilter = {
-    from: { row: 1, column: 1 },
-    to: { row: 1, column: cols.length },
+    from: { row: HEADER_ROW, column: 1 },
+    to: { row: HEADER_ROW, column: cols.length },
   }
 
   // ─── Write buffer & respond ────────────────────────────────────────────
   const buf = await wb.xlsx.writeBuffer()
-  const filename = `HR_Report_${year}_${String(month).padStart(2, '0')}_${location}.xlsx`
+  const filename = `Laxree_HR_Report_${year}_${String(month).padStart(2, '0')}_${location}.xlsx`
   return new NextResponse(buf, {
     status: 200,
     headers: {
@@ -1135,33 +1241,66 @@ async function buildSelfExcelResponse(selfReport: any, month: number, year: numb
     views: [{ showGridLines: false }],
   })
   ws1.columns = [
-    { width: 4 },    // A: spacer
+    { width: 18 },   // A: logo column (was 4 spacer, widened for logo)
     { width: 32 },   // B: label
     { width: 36 },   // C: value
     { width: 4 },    // D: spacer
   ]
 
+  // Load logo image (try multiple paths for Vercel/local compat)
+  let logoImageId: number | null = null
+  try {
+    const logoCandidates = [
+      path.join(process.cwd(), 'public', 'laxree-logo-excel.png'),
+      '/home/z/my-project/public/laxree-logo-excel.png',
+    ]
+    for (const logoPath of logoCandidates) {
+      try {
+        if (fs.existsSync(logoPath)) {
+          const imgBuf = fs.readFileSync(logoPath)
+          logoImageId = wb.addImage({ buffer: imgBuf as any, extension: 'png' })
+          break
+        }
+      } catch {}
+    }
+  } catch (e) {
+    console.warn('[hr-report:self] Could not load logo image:', e)
+  }
+
   // Row 1: spacer (thin)
   ws1.addRow([])
   ws1.getRow(1).height = 8
 
-  // Row 2: Title bar — "MY HR REPORT" (merged B:C)
+  // Row 2: Title bar — "MY HR REPORT" (merged B:C) + Logo in A
   ws1.mergeCells('B2:C2')
   const tCell = ws1.getCell('B2')
   tCell.value = 'MY HR REPORT'
   tCell.font = { name: 'Calibri', size: 22, bold: true, color: { argb: C.white } }
-  tCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: C.brandDark } }
+  tCell.fill = { type: 'pattern' as const, pattern: 'solid' as const, fgColor: { argb: C.brandDark } } as any
   tCell.alignment = { vertical: 'middle', horizontal: 'left', indent: 1 }
+  // Also fill the A column cell with brand color so the title bar looks continuous
+  const aCell2 = ws1.getCell('A2')
+  aCell2.fill = { type: 'pattern' as const, pattern: 'solid' as const, fgColor: { argb: C.brandDark } } as any
   ws1.getRow(2).height = 40
 
-  // Row 3: Subtitle — employee name + period (merged B:C)
+  // Row 3: Subtitle — employee name + period (merged B:C) + brand color in A
   ws1.mergeCells('B3:C3')
   const sCell = ws1.getCell('B3')
   sCell.value = `${emp.name || '—'}  ·  ${monthLabel}`
   sCell.font = { name: 'Calibri', size: 12, bold: true, color: { argb: C.white } }
-  sCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: C.brandMid } }
+  sCell.fill = { type: 'pattern' as const, pattern: 'solid' as const, fgColor: { argb: C.brandMid } } as any
   sCell.alignment = { vertical: 'middle', horizontal: 'left', indent: 1 }
+  const aCell3 = ws1.getCell('A3')
+  aCell3.fill = { type: 'pattern' as const, pattern: 'solid' as const, fgColor: { argb: C.brandMid } } as any
   ws1.getRow(3).height = 26
+
+  // Place the logo image spanning A2:A3 (rows 2-3, col A — total ~66px tall)
+  if (logoImageId !== null) {
+    ws1.addImage(logoImageId, {
+      tl: { col: 0, row: 1 } as any,
+      br: { col: 1, row: 3 } as any,
+    })
+  }
 
   // Row 4: spacer
   ws1.addRow([])
@@ -1255,10 +1394,10 @@ async function buildSelfExcelResponse(selfReport: any, month: number, year: numb
   ws1.getRow(r).height = 8
   r++
 
-  // ─── SCORE (OUT OF 10) SECTION ─────────────────────────────────────────
+  // ─── SCORE SECTION ─────────────────────────────────────────────────────
   ws1.mergeCells(`B${r}:C${r}`)
   const scHdr = ws1.getCell(`B${r}`)
-  scHdr.value = '🎯  SCORE (OUT OF 10)'
+  scHdr.value = '🎯  SCORE'
   scHdr.font = fontHdr
   scHdr.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: C.scoreHd } }
   scHdr.alignment = { vertical: 'middle', horizontal: 'left', indent: 1 }
@@ -1270,7 +1409,7 @@ async function buildSelfExcelResponse(selfReport: any, month: number, year: numb
   const scoreRows: [string, any][] = [
     ['Starting Score (Max)', emp.maxScore || 10],
     ['Deductions', `− ${emp.deductions}`],
-    ['Overall Score (out of 10)', `${emp.overallScore} / 10`],
+    ['Overall Score', emp.overallScore],
     ['Status', emp.status],
   ]
   for (const [label, value] of scoreRows) {
@@ -1286,7 +1425,7 @@ async function buildSelfExcelResponse(selfReport: any, month: number, year: numb
     cCell.alignment = alignLeft
 
     // Highlight overall score row specially
-    if (label === 'Overall Score (out of 10)') {
+    if (label === 'Overall Score') {
       const isLow = emp.isLowScore
       const isAvg = !isLow && emp.overallScore < 8
       const color = isLow ? C.bad : isAvg ? C.warn : C.good
