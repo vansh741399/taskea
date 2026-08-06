@@ -178,7 +178,29 @@ export function LaxreeHrReport() {
 
       {/* v25·0806-fix: data status banner — explains why reports for months
           before Aug 2026 show all zeros (ERP punch feature launched 1 Aug 2026) */}
-      {dataStatus !== 'ok' && (
+      {dataStatus === 'hrms-db-attendance' && (
+        <div style={{
+          background: 'linear-gradient(135deg, #D1FAE5 0%, #A7F3D0 100%)',
+          borderRadius: 10, padding: 14, marginBottom: 16,
+          border: '2px solid #10B981',
+          display: 'flex', gap: 12, alignItems: 'flex-start',
+        }}>
+          <div style={{ fontSize: 22 }}>✓</div>
+          <div style={{ fontSize: 12, color: '#065F46', lineHeight: 1.6, flex: 1 }}>
+            <div style={{ fontWeight: 800, marginBottom: 4, fontSize: 13 }}>
+              Showing HRMS attendance for {MONTHS.find(m => m.value === month)?.label} {year}
+            </div>
+            <div>
+              The ERP punch-in feature launched on 1 Aug 2026, so earlier months have no ERP punch data.
+              For {MONTHS.find(m => m.value === month)?.label} {year}, attendance is being read directly
+              from the HRMS database (read-only). All check-in/out times, late/early-out flags, and
+              overtime hours come from HRMS.
+            </div>
+          </div>
+        </div>
+      )}
+
+      {(dataStatus === 'no-erp-punches' || dataStatus === 'no-erp-punches-leaves-only') && (
         <div style={{
           background: dataStatus === 'no-erp-punches-leaves-only'
             ? 'linear-gradient(135deg, #FEF3C7 0%, #FDE68A 100%)'

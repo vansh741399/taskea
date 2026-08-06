@@ -7,6 +7,10 @@ import {
   findHrmsEmployeeByName,
   type HrmsEmployee,
 } from '@/lib/hrms-client'
+import {
+  fetchHrmsAttendanceByEmployee,
+  isHrmsDbConfigured,
+} from '@/lib/hrms-db'
 
 // ════════════════════════════════════════════════════════════════════════
 // v25·0806-fix — ATTENDANCE BRIDGE (LOCAL COMPUTATION)
@@ -139,6 +143,25 @@ export async function GET(request: NextRequest) {
       orderBy: { punchIn: 'asc' },
     })
 
+    // ─── 3a. FALLBACK: If NO ERP punches exist for this month, try HRMS DB ───
+    // The ERP punch feature launched 2026-08-01. For any month BEFORE that
+    // (e.g. July 2026 and earlier), there will be zero ERP punches. The HRMS
+    // DB has Attendance records for those months — fetch them directly so
+    // the user can see their actual attendance history.
+    let hrmsDbAttendance: Awaited<ReturnType<typeof fetchHrmsAttendanceByEmployee>> = []
+    let usingHrmsDbAttendance = false
+    if (punches.length === 0 && hrmsEmp && isHrmsDbConfigured()) {
+      const daysInMonthForHrms = new Date(year, month, 0).getDate()
+      hrmsDbAttendance = await fetchHrmsAttendanceByEmployee(
+        hrmsEmp.employeeId,
+        `${year}-${String(month).padStart(2, '0')}-01`,
+        `${year}-${String(month).padStart(2, '0')}-${String(daysInMonthForHrms).padStart(2, '0')}`
+      )
+      if (hrmsDbAttendance.length > 0) {
+        usingHrmsDbAttendance = true
+      }
+    }
+
     // ─── 4. Fetch ERP + HRMS leaves for the month (merge, read-only) ───
     const erpLeaves = await db.leave.findMany({
       where: {
@@ -236,6 +259,120 @@ export async function GET(request: NextRequest) {
       totalHours: number // decimal hours (e.g. 8.5 = 8h 30m)
       overtimeHours: number // decimal hours
       status: string // see map above
+    }
+
+    // ─── 5-pre. Build the employee object (HRMS-enriched) ───
+    // Needed in both the HRMS-DB shortcut and the regular ERP-punch path.
+    const employee = hrmsEmp ? {
+      employeeId: hrmsEmp.employeeId,
+      fullName: hrmsEmp.fullName,
+      email: hrmsEmp.email || user.email || null,
+      mobile: hrmsEmp.mobile || user.phone || null,
+      department: hrmsEmp.department || user.department || '',
+      designation: hrmsEmp.designation || user.designation || '',
+      location: hrmsEmp.location || user.office?.city || user.location || '',
+      firm: hrmsEmp.firm || '',
+      employmentType: hrmsEmp.employmentType || '',
+      shiftStart: hrmsEmp.shiftStart || `${SHIFT_START_HOUR}:00`,
+      shiftEnd: hrmsEmp.shiftEnd || `${SHIFT_END_HOUR}:00`,
+      shiftHours: hrmsEmp.shiftHours || (SHIFT_END_HOUR - SHIFT_START_HOUR),
+      joiningDate: hrmsEmp.joiningDate || null,
+      status: hrmsEmp.status || 'Yes',
+    } : {
+      // Fallback — no HRMS match. Use ERP user info only.
+      employeeId: user.hrmsId || '',
+      fullName: user.name,
+      email: user.email || null,
+      mobile: user.phone || null,
+      department: user.department || '',
+      designation: user.designation || '',
+      location: user.office?.city || user.location || '',
+      firm: '',
+      employmentType: '',
+      shiftStart: `${SHIFT_START_HOUR}:00`,
+      shiftEnd: `${SHIFT_END_HOUR}:00`,
+      shiftHours: SHIFT_END_HOUR - SHIFT_START_HOUR,
+      joiningDate: null,
+      status: 'Yes',
+    }
+
+    // ─── 5a. SHORTCUT: If using HRMS DB attendance, build records directly ───
+    // The HRMS Attendance table already has pre-computed status, checkIn/out,
+    // totalHours, overtimeHours — we just translate them to the frontend shape.
+    if (usingHrmsDbAttendance) {
+      const formatHrmsTime = (t: string | null): string | null => {
+        if (!t) return null
+        // HRMS stores "10:01" (24-hour). Convert to "10:01 AM" format.
+        const [hStr, mStr] = t.split(':')
+        let h = parseInt(hStr)
+        const m = mStr || '00'
+        const ampm = h >= 12 ? 'PM' : 'AM'
+        h = h % 12
+        if (h === 0) h = 12
+        return `${h}:${m} ${ampm}`
+      }
+
+      const hrmsRecords: DailyRecord[] = hrmsDbAttendance.map(a => {
+        const aParts = getIstParts(new Date(a.date))
+        // Map HRMS status to frontend status
+        let status = a.status || 'present'
+        if (a.isHoliday) status = 'holiday'
+        else if (a.isWeeklyOff) status = 'weekly-off'
+        else if (a.halfDay) status = 'half-day'
+        else if (a.lateEntry) status = 'late'
+        else if (a.earlyOut) status = 'early-out'
+        else if (a.status === 'absent') status = 'absent'
+        else status = 'present'
+
+        return {
+          date: aParts.dateStr,
+          checkIn: formatHrmsTime(a.checkIn),
+          checkOut: formatHrmsTime(a.checkOut),
+          totalHours: a.totalHours,
+          overtimeHours: a.overtimeHours,
+          status,
+        }
+      })
+
+      // Compute summary from HRMS records
+      let hrmsPresent = 0, hrmsLate = 0, hrmsEarlyOut = 0
+      let hrmsHalfDay = 0, hrmsAbsent = 0, hrmsWorkHrs = 0, hrmsOtHrs = 0
+      for (const r of hrmsRecords) {
+        if (r.status === 'present') hrmsPresent++
+        else if (r.status === 'late') hrmsLate++
+        else if (r.status === 'early-out') hrmsEarlyOut++
+        else if (r.status === 'half-day') hrmsHalfDay++
+        else if (r.status === 'absent') hrmsAbsent++
+        hrmsWorkHrs += r.totalHours
+        hrmsOtHrs += r.overtimeHours
+      }
+
+      return NextResponse.json({
+        configured: true,
+        employee,
+        records: hrmsRecords,
+        summary: {
+          present: hrmsPresent,
+          absent: hrmsAbsent,
+          late: hrmsLate,
+          halfDay: hrmsHalfDay,
+          earlyOuts: hrmsEarlyOut,
+          totalWorkHours: Math.round(hrmsWorkHrs * 100) / 100,
+          totalOvertimeHours: Math.round(hrmsOtHrs * 100) / 100,
+          totalRecords: hrmsRecords.filter(r => r.status !== 'weekly-off' && r.status !== 'holiday').length,
+        },
+        meta: {
+          mode: 'hrms-db',
+          hrmsLinked: !!hrmsEmp,
+          punchCount: 0,
+          erpLeaveCount: erpLeaves.length,
+          hrmsLeaveCount: hrmsLeavesAll.length,
+          hrmsAttendanceCount: hrmsDbAttendance.length,
+          timezone: 'Asia/Kolkata (IST, UTC+5:30)',
+          shift: `${SHIFT_START_HOUR}:00–${SHIFT_END_HOUR}:00 IST`,
+          note: 'Showing HRMS Attendance records (pre-ERP-punch era).',
+        },
+      })
     }
 
     // Group punches by IST date
@@ -375,41 +512,7 @@ export async function GET(request: NextRequest) {
       })
     }
 
-    // ─── 6. Build the employee object (HRMS-enriched) ───
-    const employee = hrmsEmp ? {
-      employeeId: hrmsEmp.employeeId,
-      fullName: hrmsEmp.fullName,
-      email: hrmsEmp.email || user.email || null,
-      mobile: hrmsEmp.mobile || user.phone || null,
-      department: hrmsEmp.department || user.department || '',
-      designation: hrmsEmp.designation || user.designation || '',
-      location: hrmsEmp.location || user.office?.city || user.location || '',
-      firm: hrmsEmp.firm || '',
-      employmentType: hrmsEmp.employmentType || '',
-      shiftStart: hrmsEmp.shiftStart || `${SHIFT_START_HOUR}:00`,
-      shiftEnd: hrmsEmp.shiftEnd || `${SHIFT_END_HOUR}:00`,
-      shiftHours: hrmsEmp.shiftHours || (SHIFT_END_HOUR - SHIFT_START_HOUR),
-      joiningDate: hrmsEmp.joiningDate || null,
-      status: hrmsEmp.status || 'Yes',
-    } : {
-      // Fallback — no HRMS match. Use ERP user info only.
-      employeeId: user.hrmsId || '',
-      fullName: user.name,
-      email: user.email || null,
-      mobile: user.phone || null,
-      department: user.department || '',
-      designation: user.designation || '',
-      location: user.office?.city || user.location || '',
-      firm: '',
-      employmentType: '',
-      shiftStart: `${SHIFT_START_HOUR}:00`,
-      shiftEnd: `${SHIFT_END_HOUR}:00`,
-      shiftHours: SHIFT_END_HOUR - SHIFT_START_HOUR,
-      joiningDate: null,
-      status: 'Yes',
-    }
-
-    // ─── 7. Build the summary object ───
+    // ─── 6. Build the summary object ───
     const summary = {
       present: presentCount,
       absent: absentCount,

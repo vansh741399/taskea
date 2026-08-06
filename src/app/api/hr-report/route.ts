@@ -8,6 +8,12 @@ import {
   type HrmsEmployee,
   type HrmsLeave,
 } from '@/lib/hrms-client'
+import {
+  fetchHrmsAttendanceForMonth,
+  fetchHrmsAttendanceByEmployee,
+  isHrmsDbConfigured,
+  type HrmsAttendanceRecord,
+} from '@/lib/hrms-db'
 import * as XLSX from 'xlsx'
 
 // ════════════════════════════════════════════════════════════════════════
@@ -74,6 +80,55 @@ function istMonthRange(year: number, month: number): { start: Date; end: Date } 
   const nextMonthStartUtcMs = Date.UTC(year, month, 1) - IST_OFFSET_MS
   const endUtcMs = nextMonthStartUtcMs - 1
   return { start: new Date(startUtcMs), end: new Date(endUtcMs) }
+}
+
+// ════════════════════════════════════════════════════════════════════════
+// v25·0806-hrms-db — Convert HRMS Attendance records to PunchLike
+// ════════════════════════════════════════════════════════════════════════
+// The HRMS DB has Attendance records for months BEFORE the ERP punch feature
+// launched (pre-2026-08). This helper converts those records to PunchLike
+// objects so they flow through the existing computeEmployeeReport logic.
+//
+// HRMS attendance has: date, checkIn ("10:01"), checkOut ("19:00"), status,
+// lateEntry, earlyOut, halfDay, isSunday, isWeeklyOff, isHoliday.
+// We synthesize punchIn/punchOut as full ISO timestamps in IST.
+// ════════════════════════════════════════════════════════════════════════
+function hrmsAttendanceToPunches(records: HrmsAttendanceRecord[]): PunchLike[] {
+  const punches: PunchLike[] = []
+  for (const a of records) {
+    // Skip non-working days — they shouldn't count as presents
+    if (a.isWeeklyOff || a.isHoliday) continue
+    if (a.status === 'absent') continue
+    if (!a.checkIn) continue
+
+    const dateObj = new Date(a.date)
+    const istParts = getIstParts(dateObj)
+    const dateStr = istParts.dateStr // YYYY-MM-DD
+
+    // Parse HRMS time "10:01" → hour, minute
+    const [inH, inM] = a.checkIn.split(':').map(s => parseInt(s) || 0)
+    // Build IST punch-in timestamp: dateStr + "T" + HH:MM + ":00+05:30"
+    // Then convert to UTC Date for storage in PunchLike
+    const punchInIso = new Date(`${dateStr}T${String(inH).padStart(2,'0')}:${String(inM).padStart(2,'0')}:00+05:30`)
+
+    let punchOut: Date | null = null
+    if (a.checkOut) {
+      const [outH, outM] = a.checkOut.split(':').map(s => parseInt(s) || 0)
+      punchOut = new Date(`${dateStr}T${String(outH).padStart(2,'0')}:${String(outM).padStart(2,'0')}:00+05:30`)
+    }
+
+    let status = 'PRESENT'
+    if (a.lateEntry) status = 'LATE'
+    else if (a.earlyOut) status = 'EARLY_OUT'
+    else if (a.halfDay) status = 'HALF_DAY'
+
+    punches.push({
+      punchIn: punchInIso,
+      punchOut: punchOut || undefined,
+      status,
+    })
+  }
+  return punches
 }
 
 // ════════════════════════════════════════════════════════════════════════
@@ -268,14 +323,37 @@ export async function GET(request: NextRequest) {
     }
     const leaves = [...erpLeaves, ...hrmsLeavesMerged]
 
+    // v25·0806-hrms-db: If ERP has NO punches for this month, try HRMS DB.
+    // This gives us attendance history for months BEFORE the ERP punch feature
+    // launched (pre-2026-08). For each ERP user, find their HRMS employeeId,
+    // then fetch HRMS attendance for that employee + month, convert to PunchLike.
+    let hrmsAttendanceCount = 0
+    const hrmsAttendanceByEmp = new Map<string, HrmsAttendanceRecord[]>()
+    if (punches.length === 0 && isHrmsDbConfigured()) {
+      const hrmsAttendanceAll = await fetchHrmsAttendanceForMonth(year, month)
+      hrmsAttendanceCount = hrmsAttendanceAll.length
+      for (const a of hrmsAttendanceAll) {
+        if (!hrmsAttendanceByEmp.has(a.employeeId)) hrmsAttendanceByEmp.set(a.employeeId, [])
+        hrmsAttendanceByEmp.get(a.employeeId)!.push(a)
+      }
+    }
+
     // 5. Compute stats per user
     const report = users.map((user, index) => {
-      const userPunches = punches.filter(p => p.userId === user.id)
+      let userPunches: PunchLike[] = punches.filter(p => p.userId === user.id)
       const userLeaves = leaves.filter(l => l.userId === user.id)
 
       // ─── Match HRMS employee by hrmsId first, then by name ───
       const hrmsEmp = findHrmsEmployeeByHrmsId(hrmsEmployees, user.hrmsId) ||
         findHrmsEmployeeByName(hrmsEmployees, user.name)
+
+      // v25·0806-hrms-db: If no ERP punches, use HRMS attendance as synthetic punches
+      if (userPunches.length === 0 && hrmsEmp && isHrmsDbConfigured()) {
+        const hrmsAtt = hrmsAttendanceByEmp.get(hrmsEmp.employeeId) || []
+        if (hrmsAtt.length > 0) {
+          userPunches = hrmsAttendanceToPunches(hrmsAtt)
+        }
+      }
 
       return computeEmployeeReport(user, userPunches, userLeaves, hrmsEmp, index, month, year, daysInMonth)
     })
@@ -296,8 +374,12 @@ export async function GET(request: NextRequest) {
       // 2026-08-01, so previous months will show 'no-erp-punches' — the
       // frontend can display a banner telling the user that only HRMS
       // leave data is shown for that month.
+      // v25·0806-hrms-db: If HRMS DB attendance is available, mark as 'hrms-db'
+      // instead — the frontend shows a positive "HRMS attendance data" banner.
       dataStatus: punches.length === 0
-        ? (hrmsLeavesMerged.length > 0 ? 'no-erp-punches-leaves-only' : 'no-erp-punches')
+        ? (hrmsAttendanceCount > 0
+            ? 'hrms-db-attendance'
+            : (hrmsLeavesMerged.length > 0 ? 'no-erp-punches-leaves-only' : 'no-erp-punches'))
         : 'ok',
       scoringConfig: {
         hrScoreMultiplier: HR_SCORE_MULTIPLIER,
@@ -324,6 +406,8 @@ export async function GET(request: NextRequest) {
       hrmsEmployeeCount: hrmsEmployees.length,
       hrmsLeavesMergedCount: hrmsLeavesMerged.length,
       punchCount: punches.length,
+      hrmsAttendanceCount,
+      hrmsDbConfigured: isHrmsDbConfigured(),
     })
   } catch (error) {
     console.error('HR Report API error:', error)
@@ -411,7 +495,22 @@ async function buildSelfReport(userId: string, month: number, year: number) {
   }
   const leaves = [...erpLeaves, ...hrmsLeavesMerged]
 
-  const empReport = computeEmployeeReport(user, punches, leaves, hrmsEmp, 0, month, year, daysInMonth)
+  // v25·0806-hrms-db: If ERP has no punches for this month, try HRMS DB attendance
+  let hrmsAttendanceCount = 0
+  let userPunches: PunchLike[] = punches
+  if (punches.length === 0 && hrmsEmp && isHrmsDbConfigured()) {
+    const hrmsAttendance = await fetchHrmsAttendanceByEmployee(
+      hrmsEmp.employeeId,
+      `${year}-${String(month).padStart(2, '0')}-01`,
+      `${year}-${String(month).padStart(2, '0')}-${String(daysInMonth).padStart(2, '0')}`
+    )
+    hrmsAttendanceCount = hrmsAttendance.length
+    if (hrmsAttendance.length > 0) {
+      userPunches = hrmsAttendanceToPunches(hrmsAttendance)
+    }
+  }
+
+  const empReport = computeEmployeeReport(user, userPunches, leaves, hrmsEmp, 0, month, year, daysInMonth)
 
   return {
     generatedAt: new Date().toISOString(),
@@ -419,7 +518,9 @@ async function buildSelfReport(userId: string, month: number, year: number) {
     mode: 'self',
     timezone: 'Asia/Kolkata (IST, UTC+5:30)',
     dataStatus: punches.length === 0
-      ? (hrmsLeavesMerged.length > 0 ? 'no-erp-punches-leaves-only' : 'no-erp-punches')
+      ? (hrmsAttendanceCount > 0
+          ? 'hrms-db-attendance'
+          : (hrmsLeavesMerged.length > 0 ? 'no-erp-punches-leaves-only' : 'no-erp-punches'))
       : 'ok',
     scoringConfig: {
       hrScoreMultiplier: HR_SCORE_MULTIPLIER,
@@ -433,6 +534,8 @@ async function buildSelfReport(userId: string, month: number, year: number) {
     hrmsSyncedAt: hrmsEmployees.length > 0 ? new Date().toISOString() : null,
     hrmsLeavesMergedCount: hrmsLeavesMerged.length,
     punchCount: punches.length,
+    hrmsAttendanceCount,
+    hrmsDbConfigured: isHrmsDbConfigured(),
   }
 }
 

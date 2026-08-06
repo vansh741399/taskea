@@ -6,6 +6,11 @@ import {
   findHrmsEmployeeByHrmsId,
   findHrmsEmployeeByName,
 } from '@/lib/hrms-client'
+import {
+  fetchHrmsPayroll,
+  fetchHrmsAttendanceByEmployee,
+  isHrmsDbConfigured,
+} from '@/lib/hrms-db'
 
 // ════════════════════════════════════════════════════════════════════════
 // v25·0806-salary-fix — SALARY SLIP BRIDGE (LOCAL COMPUTATION)
@@ -278,7 +283,50 @@ export async function GET(request: NextRequest) {
     }
 
     // ─── 5. Compute attendance stats (same logic as HR report) ───
-    const presentDates = new Set(punches.map(p => istDateString(p.punchIn)))
+    // v25·0806-hrms-db: If ERP has no punches for this month (pre-2026-08),
+    // fall back to HRMS DB Attendance records. The HRMS Attendance table has
+    // pre-computed status, checkIn/out, totalHours — we synthesize PunchLike
+    // objects so the existing computation logic works unchanged.
+    type EffectivePunch = {
+      punchIn: Date
+      punchOut: Date | null
+      status: string | null
+    }
+    let effectivePunches: EffectivePunch[] = punches.map(p => ({
+      punchIn: new Date(p.punchIn),
+      punchOut: p.punchOut ? new Date(p.punchOut) : null,
+      status: p.status,
+    }))
+    if (punches.length === 0 && isHrmsDbConfigured()) {
+      const hrmsAttendance = await fetchHrmsAttendanceByEmployee(
+        hrmsEmp.employeeId,
+        `${year}-${String(month).padStart(2, '0')}-01`,
+        `${year}-${String(month).padStart(2, '0')}-${String(daysInMonth).padStart(2, '0')}`
+      )
+      if (hrmsAttendance.length > 0) {
+        // Convert HRMS attendance to synthetic punches
+        effectivePunches = hrmsAttendance
+          .filter(a => !a.isWeeklyOff && !a.isHoliday && a.status !== 'absent' && a.checkIn)
+          .map(a => {
+            const dateObj = new Date(a.date)
+            const istDateStr = istDateString(dateObj)
+            const [inH, inM] = a.checkIn!.split(':').map(s => parseInt(s) || 0)
+            const punchIn = new Date(`${istDateStr}T${String(inH).padStart(2,'0')}:${String(inM).padStart(2,'0')}:00+05:30`)
+            let punchOut: Date | null = null
+            if (a.checkOut) {
+              const [outH, outM] = a.checkOut.split(':').map(s => parseInt(s) || 0)
+              punchOut = new Date(`${istDateStr}T${String(outH).padStart(2,'0')}:${String(outM).padStart(2,'0')}:00+05:30`)
+            }
+            let status = 'PRESENT'
+            if (a.lateEntry) status = 'LATE'
+            else if (a.earlyOut) status = 'EARLY_OUT'
+            else if (a.halfDay) status = 'HALF_DAY'
+            return { punchIn, punchOut, status }
+          })
+      }
+    }
+
+    const presentDates = new Set(effectivePunches.map(p => istDateString(p.punchIn)))
     const presentDays = presentDates.size
 
     const approvedLeaves = mergedLeaves.filter(l => l.status === 'APPROVED')
@@ -311,7 +359,7 @@ export async function GET(request: NextRequest) {
 
     // Total worked hours (sum of punchOut - punchIn for complete punches)
     let totalWorkedMinutes = 0
-    punches.forEach(p => {
+    effectivePunches.forEach(p => {
       if (p.punchOut) {
         const diff = new Date(p.punchOut).getTime() - new Date(p.punchIn).getTime()
         if (diff > 0) totalWorkedMinutes += Math.floor(diff / 60000)
@@ -328,6 +376,117 @@ export async function GET(request: NextRequest) {
       ? hrmsEmp.dailyRate
       : (monthlySalary > 0 ? Math.round((monthlySalary / daysInMonth) * 100) / 100 : 0)
 
+    // ─── 6-pre. Resolve firm details (needed in both branches) ───
+    const firmCode = (hrmsEmp.firm || 'LRSL').toUpperCase()
+    const firm = FIRM_DIRECTORY[firmCode] || DEFAULT_FIRM
+
+    // ─── 6a. CHECK HRMS DB FOR PRE-COMPUTED PAYROLL ───
+    // For months BEFORE the ERP punch feature launched (pre-2026-08), or any
+    // month where the HRMS app has already generated a payroll record, prefer
+    // the HRMS-computed payroll over our local computation. The HRMS payroll
+    // table reflects what HR actually paid the employee — it's the source of
+    // truth. ERP local computation is only a fallback for the CURRENT month
+    // where HR hasn't generated payroll yet.
+    const hrmsPayroll = isHrmsDbConfigured()
+      ? await fetchHrmsPayroll(hrmsEmp.employeeId, month, year)
+      : null
+
+    // ─── 6b. If HRMS has a payroll record, use it directly ───
+    if (hrmsPayroll && hrmsPayroll.netSalary > 0) {
+      const monthName2 = ['January','February','March','April','May','June',
+        'July','August','September','October','November','December'][month - 1]
+
+      // Also fetch HRMS attendance for context (optional)
+      const hrmsAttendance = isHrmsDbConfigured()
+        ? await fetchHrmsAttendanceByEmployee(
+            hrmsEmp.employeeId,
+            `${year}-${String(month).padStart(2, '0')}-01`,
+            `${year}-${String(month).padStart(2, '0')}-${String(daysInMonth).padStart(2, '0')}`
+          )
+        : []
+
+      const employeeFromHrms = {
+        id: hrmsEmp.id,
+        employeeId: hrmsEmp.employeeId,
+        fullName: hrmsEmp.fullName,
+        mobile: hrmsEmp.mobile || user.phone || '',
+        email: hrmsEmp.email || user.email || '',
+        designation: hrmsEmp.designation || user.designation || '',
+        department: hrmsEmp.department || user.department || '',
+        location: hrmsEmp.location || user.office?.city || user.location || '',
+        address: hrmsEmp.address || user.office?.address || '',
+        firm: hrmsEmp.firm || firmCode,
+        employmentType: hrmsEmp.employmentType || '',
+        salaryType: hrmsEmp.salaryType || 'monthly',
+        monthlySalary,
+        dailyRate: hrmsEmp.dailyRate || perDayRate,
+        hourlyRate: hrmsEmp.hourlyRate || 0,
+        overtimeRate: hrmsEmp.overtimeRate || 0,
+        shiftStart: hrmsEmp.shiftStart || `${SHIFT_START_HOUR}:00`,
+        shiftEnd: hrmsEmp.shiftEnd || `${SHIFT_END_HOUR}:00`,
+        joiningDate: hrmsEmp.joiningDate || null,
+        bankName: hrmsEmp.bankName || null,
+        bankAccount: hrmsEmp.bankAccount || null,
+        bankIfsc: hrmsEmp.bankIfsc || null,
+        panNumber: hrmsEmp.panNumber || null,
+        aadhaarNumber: hrmsEmp.aadhaarNumber || null,
+      }
+
+      const payrollFromHrms = {
+        monthlySalary: hrmsPayroll.monthlySalary || monthlySalary,
+        perDayRate,
+        baseSalary: Math.round((hrmsPayroll.grossSalary - hrmsPayroll.sundayEarnings) * 100) / 100,
+        sundayEarnings: hrmsPayroll.sundayEarnings,
+        grossSalary: hrmsPayroll.grossSalary,
+        totalEarnings: Math.round((hrmsPayroll.grossSalary + hrmsPayroll.bonus + hrmsPayroll.incentive + hrmsPayroll.arrear + hrmsPayroll.otAmount) * 100) / 100,
+        bonus: hrmsPayroll.bonus,
+        incentive: hrmsPayroll.incentive,
+        arrear: hrmsPayroll.arrear,
+        otAmount: hrmsPayroll.otAmount,
+        advanceDeduction: hrmsPayroll.advanceDeduction,
+        tdsDeduction: hrmsPayroll.tdsDeduction,
+        loanDeduction: hrmsPayroll.loanDeduction,
+        securityDeposit: hrmsPayroll.securityDeposit,
+        otherDeductions: hrmsPayroll.otherDeductions,
+        totalDeductions: hrmsPayroll.totalDeductions,
+        netSalary: hrmsPayroll.netSalary,
+        netSalaryInWords: numberToIndianWords(hrmsPayroll.netSalary),
+        presentDays: hrmsPayroll.presentDays,
+        paidLeaves: hrmsPayroll.paidLeaves,
+        fullDayLeaves: Math.floor(hrmsPayroll.paidLeaves),
+        halfDayLeaves: hrmsPayroll.paidLeaves % 1 !== 0 ? 1 : 0,
+        sundayCount: hrmsPayroll.sundayCount,
+        totalWorkedHrs: Math.floor(hrmsPayroll.totalWorkedHrs),
+        totalWorkedHrsDisplay: `${Math.floor(hrmsPayroll.totalWorkedHrs)}h ${String(Math.round((hrmsPayroll.totalWorkedHrs % 1) * 60)).padStart(2, '0')}m`,
+      }
+
+      return NextResponse.json({
+        configured: true,
+        computed: 'hrms-db',
+        source: 'HRMS Payroll table (read-only DB)',
+        employee: employeeFromHrms,
+        payroll: payrollFromHrms,
+        firm,
+        monthName: monthName2,
+        month,
+        year,
+        timezone: 'Asia/Kolkata (IST, UTC+5:30)',
+        attendance: {
+          totalPunches: hrmsAttendance.length,
+          presentDays: hrmsPayroll.presentDays,
+          paidLeaveDays: hrmsPayroll.paidLeaves,
+          payableDays: hrmsPayroll.presentDays + hrmsPayroll.paidLeaves,
+          fullDayLeaves: Math.floor(hrmsPayroll.paidLeaves),
+          halfDayLeaves: hrmsPayroll.paidLeaves % 1 !== 0 ? 1 : 0,
+          sundayCount: hrmsPayroll.sundayCount,
+          totalWorkedHrsDisplay: `${Math.floor(hrmsPayroll.totalWorkedHrs)}h ${String(Math.round((hrmsPayroll.totalWorkedHrs % 1) * 60)).padStart(2, '0')}m`,
+          erpPunchCount: punches.length,
+          hrmsAttendanceCount: hrmsAttendance.length,
+        },
+      })
+    }
+
+    // ─── 6c. NO HRMS PAYROLL — compute locally from ERP punches ───
     // Base salary = per-day rate × payable days (present + paid leaves)
     const payableDays = presentDays + paidLeaveDays
     const baseSalary = Math.round(perDayRate * payableDays * 100) / 100
@@ -352,11 +511,7 @@ export async function GET(request: NextRequest) {
     const netSalary = Math.max(0, Math.round((totalEarnings - totalDeductions) * 100) / 100)
     const netSalaryInWords = numberToIndianWords(netSalary)
 
-    // ─── 7. Resolve firm details ───
-    const firmCode = (hrmsEmp.firm || 'LRSL').toUpperCase()
-    const firm = FIRM_DIRECTORY[firmCode] || DEFAULT_FIRM
-
-    // ─── 8. Build employee object (matches HRMS salary-slip shape) ───
+    // ─── 7. Build employee object (matches HRMS salary-slip shape) ───
     const employee = {
       id: hrmsEmp.id,
       employeeId: hrmsEmp.employeeId,
@@ -418,8 +573,10 @@ export async function GET(request: NextRequest) {
 
     return NextResponse.json({
       configured: true,
-      computed: 'local',
-      source: 'ERP + HRMS (read-only)',
+      computed: effectivePunches.length > 0 && punches.length === 0 ? 'local+hrms-db' : 'local',
+      source: effectivePunches.length > 0 && punches.length === 0
+        ? 'HRMS DB Attendance + ERP leaves (read-only)'
+        : 'ERP punches + HRMS (read-only)',
       employee,
       payroll,
       firm,
@@ -428,7 +585,9 @@ export async function GET(request: NextRequest) {
       year,
       timezone: 'Asia/Kolkata (IST, UTC+5:30)',
       attendance: {
-        totalPunches: punches.length,
+        totalPunches: effectivePunches.length,
+        erpPunchCount: punches.length,
+        hrmsAttendanceUsed: punches.length === 0 && effectivePunches.length > 0,
         presentDays,
         paidLeaveDays,
         payableDays,
