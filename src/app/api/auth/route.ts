@@ -83,7 +83,31 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Invalid credentials' }, { status: 401 })
     }
 
-    // Find the user in the database
+    // v25·0806-security: Check if the user corresponding to this fallback cred
+    // is still active in the database. If they've been deactivated (e.g. their
+    // HRMS record is now inactive), refuse login — even though the hardcoded
+    // password matches. Without this check, a deactivated user could log in
+    // and (worse) get matched to a DIFFERENT active user via the role fallback
+    // below — impersonating another employee. This was the Aayush bug: his
+    // HRMS record was inactive but his fallback cred still worked, and the
+    // role-match fallback returned Girish's user ID.
+    const credUserActive = await db.user.findFirst({
+      where: { id: cred.userId },
+      select: { id: true, isActive: true, name: true },
+    })
+    if (credUserActive && credUserActive.isActive === false) {
+      // User exists in DB but has been deactivated — refuse login.
+      return NextResponse.json(
+        { error: 'Account is inactive. Please contact HR.' },
+        { status: 403 }
+      )
+    }
+
+    // Find the user in the database by ID or (name + role).
+    // v25·0806-security: Removed the previous "role match" fallback that
+    // returned ANY active user with the same role — that was an impersonation
+    // vulnerability. If we can't find the specific user, we either auto-create
+    // them (if cred.userId is set) or refuse login.
     let dbMatch = await db.user.findFirst({
       where: {
         OR: [
@@ -93,13 +117,6 @@ export async function POST(request: NextRequest) {
         isActive: true,
       },
     })
-
-    // If not found by ID/name, try role match
-    if (!dbMatch) {
-      dbMatch = await db.user.findFirst({
-        where: { role: cred.role as any, isActive: true },
-      })
-    }
 
     // ─── AUTO-CREATE missing fallback user (e.g., FOUNDER) ───────────────
     // The FOUNDER role is new — its user record (user-founder1) doesn't exist
