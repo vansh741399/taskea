@@ -225,30 +225,21 @@ export function LaxreeSalarySlipPanel() {
         <div className="cb">
           {isLoading ? (
             <div style={{ padding: 30, textAlign: 'center', color: 'var(--t3)', fontSize: 12 }}>Loading salary slip…</div>
-          ) : slip.configured === false ? (
-            <div style={{
-              padding: 18, fontSize: 12, background: 'var(--amber-l)', borderRadius: 8,
-              border: '1px solid var(--amber-m)', color: 'var(--t1)',
-            }}>
-              <div style={{ fontWeight: 800, color: 'var(--amber)', marginBottom: 6, fontSize: 13 }}>
-                ⚠ HRMS bridge is not configured yet
-              </div>
-              <div style={{ color: 'var(--t2)', lineHeight: 1.6 }}>
-                Your ERP admin needs to set <code style={{ background: 'var(--bg)', padding: '1px 6px', borderRadius: 4, fontSize: 11 }}>HRMS_BRIDGE_API_KEY</code> on the ERP Vercel project for the salary slip to work.
-              </div>
-            </div>
           ) : slip.error ? (
             <div style={{
               padding: 18, fontSize: 12, background: 'var(--red-l)', borderRadius: 8,
               border: '1px solid var(--red-m)', color: 'var(--t1)',
             }}>
               <div style={{ fontWeight: 800, color: 'var(--red)', marginBottom: 6, fontSize: 13 }}>
-                ⚠ Could not fetch salary slip from HRMS
+                ⚠ Could not generate salary slip
               </div>
               <div style={{ color: 'var(--t2)', marginBottom: 8 }}>{slip.error}</div>
+              <div style={{ color: 'var(--t3)', fontSize: 11, lineHeight: 1.6 }}>
+                The server may be cold-starting or the database connection may have timed out. Please retry in a few seconds.
+              </div>
               <button
                 className="btn"
-                style={{ marginTop: 4, padding: '5px 12px', fontSize: 11, fontWeight: 700 }}
+                style={{ marginTop: 10, padding: '5px 12px', fontSize: 11, fontWeight: 700 }}
                 onClick={() => queryClient.invalidateQueries({ queryKey: ['salary-slip-bridge', currentUserId, month, year] })}
               >
                 ↻ Retry now
