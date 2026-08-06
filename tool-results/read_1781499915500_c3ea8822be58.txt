@@ -1,0 +1,543 @@
+     1→'use client'
+     2→
+     3→import { useQuery, useQueryClient } from '@tanstack/react-query'
+     4→import { useWorkflowStore } from '@/stores/workflow-store'
+     5→import { useState } from 'react'
+     6→
+     7→export function LaxreeEmployeeDashboard() {
+     8→  const { currentUserId, currentUserName, currentRole, addToast, setActivePage } = useWorkflowStore()
+     9→  const queryClient = useQueryClient()
+    10→
+    11→  // Tab navigation for employee dashboard
+    12→  const [empTab, setEmpTab] = useState<'overview' | 'tasks' | 'scorecard'>('overview')
+    13→
+    14→  // Fetch employee's tasks (read-only) — ONLY tasks assigned to this employee
+    15→  const { data: tasksData = [] } = useQuery({
+    16→    queryKey: ['emp-tasks', currentUserId],
+    17→    queryFn: () => fetch(`/api/tasks?ownerId=${currentUserId}`).then(r => r.json()),
+    18→    enabled: !!currentUserId,
+    19→  })
+    20→
+    21→  // Fetch employee's leaves
+    22→  const { data: leavesData = { leaves: [] } } = useQuery({
+    23→    queryKey: ['emp-leaves', currentUserId],
+    24→    queryFn: async () => {
+    25→      const res = await fetch(`/api/leaves?userId=${currentUserId}`)
+    26→      if (!res.ok) throw new Error('Failed to fetch leaves')
+    27→      return res.json()
+    28→    },
+    29→    enabled: !!currentUserId,
+    30→    refetchOnMount: 'always',
+    31→    staleTime: 0,
+    32→  })
+    33→
+    34→  // Fetch employee's weekly score
+    35→  const getWeekInfo = () => {
+    36→    const now = new Date()
+    37→    const day = now.getDay()
+    38→    const diff = now.getDate() - day + (day === 0 ? -6 : 1)
+    39→    const monday = new Date(now.setDate(diff))
+    40→    const sunday = new Date(monday.getTime() + 6 * 24 * 60 * 60 * 1000)
+    41→    const d = new Date(Date.UTC(now.getFullYear(), now.getMonth(), now.getDate()))
+    42→    const dayNum = d.getUTCDay() || 7
+    43→    d.setUTCDate(d.getUTCDate() + 4 - dayNum)
+    44→    const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1))
+    45→    const weekNum = Math.ceil((((d.getTime() - yearStart.getTime()) / 86400000) + 1) / 7)
+    46→    return { monday, sunday, weekNum, year: now.getFullYear() }
+    47→  }
+    48→
+    49→  const weekInfo = getWeekInfo()
+    50→
+    51→  const { data: scoreData } = useQuery({
+    52→    queryKey: ['emp-score', currentUserId],
+    53→    queryFn: () => fetch(
+    54→      `/api/weekly-score?userId=${currentUserId}&weekStart=${weekInfo.monday.toISOString()}&weekEnd=${weekInfo.sunday.toISOString()}`
+    55→    ).then(r => r.json()),
+    56→    enabled: !!currentUserId,
+    57→  })
+    58→
+    59→  const tasks = Array.isArray(tasksData) ? tasksData : []
+    60→  const leaves = Array.isArray(leavesData) ? leavesData : (leavesData.leaves || [])
+    61→  const score = scoreData as any
+    62→
+    63→  // Stats
+    64→  const activeTasks = tasks.filter((t: any) => t.status === 'IN_PROGRESS' || t.status === 'PENDING' || t.status === 'ON_HOLD')
+    65→  const completedTasks = tasks.filter((t: any) => t.status === 'COMPLETED')
+    66→  const pendingLeaves = leaves.filter((l: any) => l.status === 'PENDING')
+    67→  const approvedLeaves = leaves.filter((l: any) => l.status === 'APPROVED')
+    68→
+    69→  const statusStyle: Record<string, { bg: string; color: string; label: string }> = {
+    70→    PENDING: { bg: '#FEF3C7', color: '#92400E', label: 'Pending' },
+    71→    IN_PROGRESS: { bg: '#DBEAFE', color: '#1D4ED8', label: 'In Progress' },
+    72→    COMPLETED: { bg: '#DCFCE7', color: '#15803D', label: 'Done' },
+    73→    CANCELLED: { bg: '#F3F4F6', color: '#6B7280', label: 'Cancelled' },
+    74→    ON_HOLD: { bg: '#EDE9FE', color: '#6D28D9', label: 'On Hold' },
+    75→    ESCALATED: { bg: '#FEE2E2', color: '#DC2626', label: 'Escalated' },
+    76→    EXTERNAL_HOLD: { bg: '#EDE9FE', color: '#6D28D9', label: 'Ext Hold' },
+    77→  }
+    78→
+    79→  const leaveStatusStyle: Record<string, { bg: string; color: string; label: string }> = {
+    80→    PENDING: { bg: '#FEF3C7', color: '#92400E', label: 'Pending' },
+    81→    APPROVED: { bg: '#DCFCE7', color: '#15803D', label: 'Approved' },
+    82→    REJECTED: { bg: '#FEE2E2', color: '#DC2626', label: 'Rejected' },
+    83→    CANCELLED: { bg: '#F3F4F6', color: '#6B7280', label: 'Cancelled' },
+    84→  }
+    85→
+    86→  const tabItems = [
+    87→    { id: 'overview' as const, label: 'Overview', icon: '📊' },
+    88→    { id: 'tasks' as const, label: 'My Tasks', icon: '📋' },
+    89→    { id: 'scorecard' as const, label: 'My Scorecard', icon: '📈' },
+    90→  ]
+    91→
+    92→  return (
+    93→    <>
+    94→      <div className="ph">
+    95→        <div className="ph-left">
+    96→          <h2>My Dashboard</h2>
+    97→          <p>Welcome, {currentUserName || 'Employee'}</p>
+    98→        </div>
+    99→        <div className="ph-right">
+   100→          <button className="btn" style={{ fontSize: 11, padding: '6px 14px', background: 'rgba(109,40,217,.1)', color: '#6D28D9', fontWeight: 800, border: '1px solid rgba(109,40,217,.3)' }}
+   101→            onClick={() => setActivePage('ai-assistant')}>
+   102→            🤖 AI Assistant
+   103→          </button>
+   104→          <button className="btn btn-gold" onClick={() => setActivePage('emp-leaves')}>
+   105→            🏖️ Leave Management
+   106→          </button>
+   107→        </div>
+   108→      </div>
+   109→      <div className="page-accent" />
+   110→
+   111→      {/* Tab Navigation */}
+   112→      <div className="tabs" style={{ marginBottom: 16 }}>
+   113→        {tabItems.map(tab => (
+   114→          <div key={tab.id} className={`tab${empTab === tab.id ? ' active' : ''}`}
+   115→            onClick={() => setEmpTab(tab.id)}>
+   116→            <span style={{ marginRight: 4 }}>{tab.icon}</span> {tab.label}
+   117→            {tab.id === 'tasks' && activeTasks.length > 0 && <span className="tab-cnt">{activeTasks.length}</span>}
+   118→          </div>
+   119→        ))}
+   120→      </div>
+   121→
+   122→      {/* ===================== OVERVIEW TAB ===================== */}
+   123→      {empTab === 'overview' && (
+   124→        <>
+   125→          {/* Stats Cards */}
+   126→          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 10, marginBottom: 16 }}>
+   127→            <div className="lcard" style={{ padding: '14px 16px' }}>
+   128→              <div style={{ fontSize: 10, fontWeight: 800, textTransform: 'uppercase', letterSpacing: 1, color: 'var(--t3)', marginBottom: 4 }}>Active Tasks</div>
+   129→              <div style={{ fontSize: 28, fontWeight: 900, color: 'var(--blue)' }}>{activeTasks.length}</div>
+   130→            </div>
+   131→            <div className="lcard" style={{ padding: '14px 16px' }}>
+   132→              <div style={{ fontSize: 10, fontWeight: 800, textTransform: 'uppercase', letterSpacing: 1, color: 'var(--t3)', marginBottom: 4 }}>Completed</div>
+   133→              <div style={{ fontSize: 28, fontWeight: 900, color: 'var(--green)' }}>{completedTasks.length}</div>
+   134→            </div>
+   135→            <div className="lcard" style={{ padding: '14px 16px' }}>
+   136→              <div style={{ fontSize: 10, fontWeight: 800, textTransform: 'uppercase', letterSpacing: 1, color: 'var(--t3)', marginBottom: 4 }}>Pending Leaves</div>
+   137→              <div style={{ fontSize: 28, fontWeight: 900, color: 'var(--amber)' }}>{pendingLeaves.length}</div>
+   138→            </div>
+   139→            <div className="lcard" style={{ padding: '14px 16px' }}>
+   140→              <div style={{ fontSize: 10, fontWeight: 800, textTransform: 'uppercase', letterSpacing: 1, color: 'var(--t3)', marginBottom: 4 }}>PR Score</div>
+   141→              <div style={{ fontSize: 28, fontWeight: 900, color: score?.prScore >= 70 ? 'var(--green)' : score?.prScore >= 40 ? 'var(--amber)' : 'var(--red)' }}>{score?.prScore || 0}</div>
+   142→            </div>
+   143→          </div>
+   144→
+   145→          {/* Quick Overview: Recent Tasks */}
+   146→          <div className="lcard" style={{ marginBottom: 16 }}>
+   147→            <div className="ch">
+   148→              <div className="ct">📋 Recent Assigned Tasks</div>
+   149→              <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+   150→                <span style={{ fontSize: 9, fontWeight: 700, color: 'var(--t4)', background: 'var(--bg2)', padding: '2px 8px', borderRadius: 4 }}>
+   151→                  🔒 Read Only
+   152→                </span>
+   153→                <span className="badge b-blue" style={{ fontSize: 10 }}>{tasks.length}</span>
+   154→              </div>
+   155→            </div>
+   156→            <div className="cb" style={{ padding: 0 }}>
+   157→              {tasks.length === 0 ? (
+   158→                <div style={{ textAlign: 'center', padding: 30, color: 'var(--t3)' }}>
+   159→                  <div style={{ fontSize: 28, marginBottom: 6 }}>📋</div>
+   160→                  <div style={{ fontWeight: 700 }}>No tasks assigned to you</div>
+   161→                  <div style={{ fontSize: 11, marginTop: 4 }}>Tasks will appear here when assigned by Arti Sharma</div>
+   162→                </div>
+   163→              ) : (
+   164→                <div className="tw">
+   165→                  <table className="ltable">
+   166→                    <thead>
+   167→                      <tr><th>Task</th><th>Priority</th><th>Status</th><th>Due</th><th>Steps</th></tr>
+   168→                    </thead>
+   169→                    <tbody>
+   170→                      {tasks.slice(0, 5).map((task: any) => {
+   171→                        const sStyle = statusStyle[task.status] || statusStyle.PENDING
+   172→                        const stepsTotal = task.taskSteps?.length || 0
+   173→                        const stepsDone = task.taskSteps?.filter((s: any) => s.status === 'COMPLETED').length || 0
+   174→                        return (
+   175→                          <tr key={task.id}>
+   176→                            <td style={{ fontWeight: 600 }}>{task.title}</td>
+   177→                            <td>
+   178→                              <span className="badge" style={{
+   179→                                fontSize: 9, padding: '2px 8px',
+   180→                                background: task.priority === 'HIGH' || task.priority === 'CRITICAL' ? '#FEF2F2' : task.priority === 'MEDIUM' ? '#FFFBEB' : '#EFF6FF',
+   181→                                color: task.priority === 'HIGH' || task.priority === 'CRITICAL' ? '#DC2626' : task.priority === 'MEDIUM' ? '#D97706' : '#2563EB',
+   182→                                fontWeight: 700,
+   183→                              }}>
+   184→                                {task.priority || 'MEDIUM'}
+   185→                              </span>
+   186→                            </td>
+   187→                            <td><span className="badge" style={{ fontSize: 9, padding: '2px 8px', background: sStyle.bg, color: sStyle.color, fontWeight: 700 }}>{sStyle.label}</span></td>
+   188→                            <td style={{ fontSize: 11, color: 'var(--t3)' }}>
+   189→                              {task.dueDate ? new Date(task.dueDate).toLocaleDateString('en-IN', { day: '2-digit', month: 'short' }) : '—'}
+   190→                            </td>
+   191→                            <td style={{ fontSize: 11 }}>
+   192→                              {stepsTotal > 0 ? (
+   193→                                <span style={{ fontWeight: 700, color: stepsDone === stepsTotal ? 'var(--green)' : 'var(--blue)' }}>
+   194→                                  {stepsDone}/{stepsTotal}
+   195→                                </span>
+   196→                              ) : '—'}
+   197→                            </td>
+   198→                          </tr>
+   199→                        )
+   200→                      })}
+   201→                    </tbody>
+   202→                  </table>
+   203→                </div>
+   204→              )}
+   205→              {/* Read-only notice */}
+   206→              <div style={{ padding: '8px 16px', background: 'var(--bg2)', borderTop: '1px solid var(--b1)', fontSize: 10, color: 'var(--t4)', fontWeight: 600 }}>
+   207→                🔒 Only Arti Sharma can mark tasks as Done or Revise. You can view your assigned tasks here.
+   208→              </div>
+   209→            </div>
+   210→          </div>
+   211→
+   212→          {/* Quick Leave Overview */}
+   213→          <div className="lcard" style={{ marginBottom: 16 }}>
+   214→            <div className="ch">
+   215→              <div className="ct">🏖️ My Recent Leaves</div>
+   216→              <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+   217→                <button className="btn" style={{ fontSize: 10, padding: '3px 10px', background: 'var(--gb)', color: 'var(--g2)', fontWeight: 700 }}
+   218→                  onClick={() => setActivePage('emp-leaves')}>
+   219→                  View All & Apply
+   220→                </button>
+   221→                <span className="badge b-gold" style={{ fontSize: 10 }}>{leaves.length}</span>
+   222→              </div>
+   223→            </div>
+   224→            <div className="cb" style={{ padding: 0 }}>
+   225→              {leaves.length === 0 ? (
+   226→                <div style={{ textAlign: 'center', padding: 24, color: 'var(--t3)' }}>
+   227→                  <div style={{ fontWeight: 700 }}>No leaves applied</div>
+   228→                  <div style={{ fontSize: 11, marginTop: 4 }}>
+   229→                    <button className="btn" style={{ fontSize: 11, padding: '4px 12px', background: 'var(--gb)', color: 'var(--g2)', fontWeight: 700 }}
+   230→                      onClick={() => setActivePage('emp-leaves')}>
+   231→                      Go to Leave Management →
+   232→                    </button>
+   233→                  </div>
+   234→                </div>
+   235→              ) : (
+   236→                <div className="tw">
+   237→                  <table className="ltable">
+   238→                    <thead>
+   239→                      <tr><th>Type</th><th>From</th><th>To</th><th>Tag</th><th>Status</th><th>EA Remark</th></tr>
+   240→                    </thead>
+   241→                    <tbody>
+   242→                      {leaves.slice(0, 5).map((leave: any) => {
+   243→                        const lsStyle = leaveStatusStyle[leave.status] || leaveStatusStyle.PENDING
+   244→                        return (
+   245→                          <tr key={leave.id}>
+   246→                            <td style={{ fontWeight: 600, fontSize: 11 }}>{leave.leaveType}</td>
+   247→                            <td style={{ fontSize: 11 }}>{new Date(leave.fromDate).toLocaleDateString('en-IN', { day: '2-digit', month: 'short' })}</td>
+   248→                            <td style={{ fontSize: 11 }}>{new Date(leave.toDate).toLocaleDateString('en-IN', { day: '2-digit', month: 'short' })}</td>
+   249→                            <td>
+   250→                              <span className="badge" style={{
+   251→                                fontSize: 10, padding: '2px 8px', fontWeight: 900, letterSpacing: 0.5,
+   252→                                background: leave.applicationTag === 'AL' ? 'var(--green-l)' : '#FEE2E2',
+   253→                                color: leave.applicationTag === 'AL' ? 'var(--green)' : 'var(--red)',
+   254→                              }}>
+   255→                                {leave.applicationTag === 'AL' ? '✓ AL' : '⚠ LA'}
+   256→                              </span>
+   257→                            </td>
+   258→                            <td><span className="badge" style={{ fontSize: 9, padding: '2px 8px', background: lsStyle.bg, color: lsStyle.color, fontWeight: 700 }}>{lsStyle.label}</span></td>
+   259→                            <td style={{ fontSize: 10, color: 'var(--t3)', maxWidth: 100, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{leave.eaRemark || '—'}</td>
+   260→                          </tr>
+   261→                        )
+   262→                      })}
+   263→                    </tbody>
+   264→                  </table>
+   265→                </div>
+   266→              )}
+   267→            </div>
+   268→          </div>
+   269→
+   270→          {/* Quick Score Overview */}
+   271→          <div className="lcard">
+   272→            <div className="ch">
+   273→              <div className="ct">📈 My Weekly Score</div>
+   274→              <span style={{ fontSize: 9, fontWeight: 700, color: 'var(--t4)', background: 'var(--bg2)', padding: '2px 8px', borderRadius: 4 }}>
+   275→                Week {weekInfo.weekNum}
+   276→              </span>
+   277→            </div>
+   278→            <div className="cb">
+   279→              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12, marginBottom: 12 }}>
+   280→                <div style={{ textAlign: 'center', padding: '12px 8px', borderRadius: 8, background: '#FEF2F2' }}>
+   281→                  <div style={{ fontSize: 9, fontWeight: 800, textTransform: 'uppercase', color: '#DC2626', marginBottom: 2 }}>Red</div>
+   282→                  <div style={{ fontSize: 22, fontWeight: 900, color: '#DC2626' }}>{score?.redScore || 0}%</div>
+   283→                </div>
+   284→                <div style={{ textAlign: 'center', padding: '12px 8px', borderRadius: 8, background: '#FFFBEB' }}>
+   285→                  <div style={{ fontSize: 9, fontWeight: 800, textTransform: 'uppercase', color: '#D97706', marginBottom: 2 }}>Yellow</div>
+   286→                  <div style={{ fontSize: 22, fontWeight: 900, color: '#D97706' }}>{score?.yellowScore || 0}%</div>
+   287→                </div>
+   288→                <div style={{ textAlign: 'center', padding: '12px 8px', borderRadius: 8, background: '#DCFCE7' }}>
+   289→                  <div style={{ fontSize: 9, fontWeight: 800, textTransform: 'uppercase', color: '#15803D', marginBottom: 2 }}>Green</div>
+   290→                  <div style={{ fontSize: 22, fontWeight: 900, color: '#15803D' }}>{score?.greenScore || 0}%</div>
+   291→                </div>
+   292→              </div>
+   293→              <div style={{ padding: '8px 12px', borderRadius: 8, background: score?.prScore >= 70 ? 'var(--green-l)' : score?.prScore >= 40 ? 'var(--amber-l)' : 'var(--red-l)', textAlign: 'center' }}>
+   294→                <div style={{ fontSize: 8, fontWeight: 800, textTransform: 'uppercase', color: 'var(--t3)' }}>PR Score</div>
+   295→                <div style={{ fontSize: 24, fontWeight: 900, color: score?.prScore >= 70 ? 'var(--green)' : score?.prScore >= 40 ? 'var(--amber)' : 'var(--red)' }}>{score?.prScore || 0}</div>
+   296→              </div>
+   297→              <div style={{ marginTop: 8, fontSize: 10, color: 'var(--t3)' }}>
+   298→                <span style={{ color: '#22C55E' }}>✓ On time: {score?.completedOnTime || 0}</span> ·{' '}
+   299→                <span style={{ color: '#F59E0B' }}>◐ In progress/Late: {(score?.inProgressOnTrack || 0) + (score?.completedLate || 0)}</span> ·{' '}
+   300→                <span style={{ color: '#EF4444' }}>✕ Overdue: {score?.overdue || 0}</span> ·{' '}
+   301→                <span style={{ fontWeight: 700 }}>Total: {score?.totalTasks || 0}</span>
+   302→              </div>
+   303→            </div>
+   304→          </div>
+   305→        </>
+   306→      )}
+   307→
+   308→      {/* ===================== MY TASKS TAB (READ ONLY) ===================== */}
+   309→      {empTab === 'tasks' && (
+   310→        <div className="lcard">
+   311→          <div className="ch">
+   312→            <div className="ct">📋 My Assigned Tasks</div>
+   313→            <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+   314→              <span style={{ fontSize: 9, fontWeight: 700, color: 'var(--t4)', background: 'var(--bg2)', padding: '2px 8px', borderRadius: 4 }}>
+   315→                🔒 Read Only — Cannot Edit or Mark Done
+   316→              </span>
+   317→              <span className="badge b-blue" style={{ fontSize: 10 }}>{tasks.length}</span>
+   318→            </div>
+   319→          </div>
+   320→          <div className="cb" style={{ padding: 0 }}>
+   321→            {tasks.length === 0 ? (
+   322→              <div style={{ textAlign: 'center', padding: 40, color: 'var(--t3)' }}>
+   323→                <div style={{ fontSize: 32, marginBottom: 8 }}>📋</div>
+   324→                <div style={{ fontWeight: 700, fontSize: 14 }}>No tasks assigned to you</div>
+   325→                <div style={{ fontSize: 11, marginTop: 4 }}>Tasks will appear here when assigned by Arti Sharma (EA)</div>
+   326→              </div>
+   327→            ) : (
+   328→              <div style={{ display: 'flex', flexDirection: 'column' }}>
+   329→                {tasks.map((task: any) => {
+   330→                  const sStyle = statusStyle[task.status] || statusStyle.PENDING
+   331→                  const stepsTotal = task.taskSteps?.length || 0
+   332→                  const stepsDone = task.taskSteps?.filter((s: any) => s.status === 'COMPLETED').length || 0
+   333→                  const stepsAllDone = stepsTotal > 0 && stepsDone === stepsTotal
+   334→                  const isCompleted = task.status === 'COMPLETED'
+   335→                  const isOverdue = task.dueDate && new Date(task.dueDate) < new Date() && !isCompleted
+   336→
+   337→                  return (
+   338→                    <div key={task.id} style={{
+   339→                      padding: '14px 16px',
+   340→                      borderBottom: '1px solid var(--b1)',
+   341→                      background: isCompleted ? 'rgba(22,163,74,.03)' : isOverdue ? 'rgba(220,38,38,.03)' : undefined,
+   342→                    }}>
+   343→                      {/* Task header row */}
+   344→                      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 6 }}>
+   345→                        {/* Status dot */}
+   346→                        <div style={{
+   347→                          width: 8, height: 8, borderRadius: '50%', flexShrink: 0,
+   348→                          background: isCompleted ? 'var(--green)' : isOverdue ? 'var(--red)' : task.status === 'IN_PROGRESS' ? 'var(--blue)' : 'var(--amber)',
+   349→                        }} />
+   350→
+   351→                        {/* Title */}
+   352→                        <div style={{ flex: 1, fontWeight: 700, fontSize: 13, color: 'var(--t1)' }}>
+   353→                          {isCompleted && '✅ '}{task.title}
+   354→                        </div>
+   355→
+   356→                        {/* Priority badge */}
+   357→                        <span className="badge" style={{
+   358→                          fontSize: 9, padding: '2px 8px',
+   359→                          background: task.priority === 'HIGH' || task.priority === 'CRITICAL' ? '#FEF2F2' : task.priority === 'MEDIUM' ? '#FFFBEB' : '#EFF6FF',
+   360→                          color: task.priority === 'HIGH' || task.priority === 'CRITICAL' ? '#DC2626' : task.priority === 'MEDIUM' ? '#D97706' : '#2563EB',
+   361→                          fontWeight: 700,
+   362→                        }}>
+   363→                          {task.priority || 'MEDIUM'}
+   364→                        </span>
+   365→
+   366→                        {/* Status badge */}
+   367→                        <span className="badge" style={{ fontSize: 9, padding: '2px 8px', background: sStyle.bg, color: sStyle.color, fontWeight: 700 }}>
+   368→                          {sStyle.label}
+   369→                        </span>
+   370→                      </div>
+   371→
+   372→                      {/* Task meta */}
+   373→                      <div style={{ display: 'flex', alignItems: 'center', gap: 12, fontSize: 11, color: 'var(--t3)', marginLeft: 18, flexWrap: 'wrap' }}>
+   374→                        {task.department && (
+   375→                          <span><span className="badge b-gray" style={{ fontSize: 9, padding: '1px 6px' }}>{task.department}</span></span>
+   376→                        )}
+   377→                        {task.dueDate && (
+   378→                          <span style={isOverdue ? { color: 'var(--red)', fontWeight: 700 } : {}}>
+   379→                            Due: {new Date(task.dueDate).toLocaleDateString('en-IN', { day: '2-digit', month: 'short' })}
+   380→                            {isOverdue && ' (Overdue)'}
+   381→                          </span>
+   382→                        )}
+   383→                        {task.category && <span>Category: {task.category}</span>}
+   384→                      </div>
+   385→
+   386→                      {/* Steps progress */}
+   387→                      {stepsTotal > 0 && (
+   388→                        <div style={{ marginTop: 8, marginLeft: 18 }}>
+   389→                          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+   390→                            <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--t3)' }}>
+   391→                              Steps: {stepsDone}/{stepsTotal}
+   392→                            </span>
+   393→                            <div style={{ flex: 1, height: 4, borderRadius: 2, background: 'var(--bg2)' }}>
+   394→                              <div style={{
+   395→                                height: '100%', borderRadius: 2,
+   396→                                width: `${stepsTotal > 0 ? (stepsDone / stepsTotal) * 100 : 0}%`,
+   397→                                background: stepsAllDone ? 'var(--green)' : 'var(--blue)',
+   398→                                transition: 'width 0.3s ease',
+   399→                              }} />
+   400→                            </div>
+   401→                          </div>
+   402→                          {/* Step items */}
+   403→                          <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+   404→                            {task.taskSteps?.map((step: any) => (
+   405→                              <div key={step.id} style={{
+   406→                                display: 'flex', alignItems: 'center', gap: 6,
+   407→                                fontSize: 10, color: step.status === 'COMPLETED' ? 'var(--green)' : 'var(--t3)',
+   408→                              }}>
+   409→                                <span style={{ fontWeight: 700 }}>{step.status === 'COMPLETED' ? '✓' : '○'}</span>
+   410→                                <span style={step.status === 'COMPLETED' ? { textDecoration: 'line-through' } : {}}>{step.title}</span>
+   411→                              </div>
+   412→                            ))}
+   413→                          </div>
+   414→                        </div>
+   415→                      )}
+   416→
+   417→                      {/* No edit notice per task */}
+   418→                      {isCompleted && (
+   419→                        <div style={{ marginTop: 6, marginLeft: 18, fontSize: 10, color: 'var(--green)', fontWeight: 600 }}>
+   420→                          ✅ Completed task
+   421→                        </div>
+   422→                      )}
+   423→                    </div>
+   424→                  )
+   425→                })}
+   426→              </div>
+   427→            )}
+   428→
+   429→            {/* Footer notice */}
+   430→            <div style={{ padding: '10px 16px', background: 'var(--bg2)', borderTop: '1px solid var(--b1)', fontSize: 10, color: 'var(--t4)', fontWeight: 600 }}>
+   431→              🔒 You cannot edit, mark Done, or change any task. Only Arti Sharma (EA) can mark tasks as Done or Revise them.
+   432→            </div>
+   433→          </div>
+   434→        </div>
+   435→      )}
+   436→
+   437→      {/* ===================== MY SCORECARD TAB ===================== */}
+   438→      {empTab === 'scorecard' && (
+   439→        <>
+   440→          <div className="lcard" style={{ marginBottom: 16 }}>
+   441→            <div className="ch">
+   442→              <div className="ct">📈 My Performance Scorecard</div>
+   443→              <span style={{ fontSize: 9, fontWeight: 700, color: 'var(--t4)', background: 'var(--bg2)', padding: '2px 8px', borderRadius: 4 }}>
+   444→                Week {weekInfo.weekNum} · {weekInfo.year}
+   445→              </span>
+   446→            </div>
+   447→            <div className="cb">
+   448→              {/* Big Score Display */}
+   449→              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 16 }}>
+   450→                {/* PR Score */}
+   451→                <div style={{
+   452→                  padding: '20px 16px', borderRadius: 12,
+   453→                  background: score?.prScore >= 70 ? 'linear-gradient(135deg, #DCFCE7, #BBF7D0)' : score?.prScore >= 40 ? 'linear-gradient(135deg, #FEF3C7, #FDE68A)' : 'linear-gradient(135deg, #FEE2E2, #FECACA)',
+   454→                  textAlign: 'center', position: 'relative', overflow: 'hidden',
+   455→                }}>
+   456→                  <div style={{ fontSize: 10, fontWeight: 800, textTransform: 'uppercase', letterSpacing: 1, color: 'var(--t3)', marginBottom: 4 }}>PR Score</div>
+   457→                  <div style={{ fontSize: 42, fontWeight: 900, color: score?.prScore >= 70 ? 'var(--green)' : score?.prScore >= 40 ? 'var(--amber)' : 'var(--red)' }}>
+   458→                    {score?.prScore || 0}
+   459→                  </div>
+   460→                  <div style={{ fontSize: 10, fontWeight: 600, color: 'var(--t3)', marginTop: 2 }}>
+   461→                    {score?.prScore >= 70 ? 'Excellent' : score?.prScore >= 40 ? 'Needs Improvement' : 'Critical'}
+   462→                  </div>
+   463→                </div>
+   464→
+   465→                {/* Total Tasks */}
+   466→                <div style={{
+   467→                  padding: '20px 16px', borderRadius: 12,
+   468→                  background: 'linear-gradient(135deg, var(--bg), var(--bg2))',
+   469→                  textAlign: 'center',
+   470→                }}>
+   471→                  <div style={{ fontSize: 10, fontWeight: 800, textTransform: 'uppercase', letterSpacing: 1, color: 'var(--t3)', marginBottom: 4 }}>Total Tasks</div>
+   472→                  <div style={{ fontSize: 42, fontWeight: 900, color: 'var(--t1)' }}>
+   473→                    {score?.totalTasks || 0}
+   474→                  </div>
+   475→                  <div style={{ fontSize: 10, fontWeight: 600, color: 'var(--t3)', marginTop: 2 }}>
+   476→                    this week
+   477→                  </div>
+   478→                </div>
+   479→              </div>
+   480→
+   481→              {/* R/Y/G Scores */}
+   482→              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 10, marginBottom: 16 }}>
+   483→                <div style={{ textAlign: 'center', padding: '16px 8px', borderRadius: 10, background: '#FEF2F2', border: '1px solid rgba(220,38,38,.15)' }}>
+   484→                  <div style={{ fontSize: 9, fontWeight: 800, textTransform: 'uppercase', color: '#DC2626', marginBottom: 2 }}>Red Score</div>
+   485→                  <div style={{ fontSize: 28, fontWeight: 900, color: '#DC2626' }}>{score?.redScore || 0}%</div>
+   486→                  <div style={{ fontSize: 9, color: '#DC2626', fontWeight: 600, marginTop: 2 }}>Overdue/Rejected: {((score?.overdue || 0) + (score?.rejected || 0))}</div>
+   487→                </div>
+   488→                <div style={{ textAlign: 'center', padding: '16px 8px', borderRadius: 10, background: '#FFFBEB', border: '1px solid rgba(217,119,6,.15)' }}>
+   489→                  <div style={{ fontSize: 9, fontWeight: 800, textTransform: 'uppercase', color: '#D97706', marginBottom: 2 }}>Yellow Score</div>
+   490→                  <div style={{ fontSize: 28, fontWeight: 900, color: '#D97706' }}>{score?.yellowScore || 0}%</div>
+   491→                  <div style={{ fontSize: 9, color: '#D97706', fontWeight: 600, marginTop: 2 }}>In Progress/Late: {(score?.inProgressOnTrack || 0) + (score?.completedLate || 0)}</div>
+   492→                </div>
+   493→                <div style={{ textAlign: 'center', padding: '16px 8px', borderRadius: 10, background: '#DCFCE7', border: '1px solid rgba(21,128,61,.15)' }}>
+   494→                  <div style={{ fontSize: 9, fontWeight: 800, textTransform: 'uppercase', color: '#15803D', marginBottom: 2 }}>Green Score</div>
+   495→                  <div style={{ fontSize: 28, fontWeight: 900, color: '#15803D' }}>{score?.greenScore || 0}%</div>
+   496→                  <div style={{ fontSize: 9, color: '#15803D', fontWeight: 600, marginTop: 2 }}>On Time: {score?.completedOnTime || 0}</div>
+   497→                </div>
+   498→              </div>
+   499→
+   500→              {/* Breakdown */}
+   501→              <div style={{ padding: '12px 16px', borderRadius: 8, background: 'var(--bg2)' }}>
+   502→                <div style={{ fontSize: 11, fontWeight: 700, marginBottom: 8, color: 'var(--t2)' }}>Task Breakdown</div>
+   503→                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+   504→                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11 }}>
+   505→                    <span style={{ color: '#22C55E' }}>✓ Completed on time</span>
+   506→                    <span style={{ fontWeight: 800 }}>{score?.completedOnTime || 0}</span>
+   507→                  </div>
+   508→                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11 }}>
+   509→                    <span style={{ color: '#F59E0B' }}>◐ In progress / On track</span>
+   510→                    <span style={{ fontWeight: 800 }}>{score?.inProgressOnTrack || 0}</span>
+   511→                  </div>
+   512→                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11 }}>
+   513→                    <span style={{ color: '#F59E0B' }}>◐ Completed late</span>
+   514→                    <span style={{ fontWeight: 800 }}>{score?.completedLate || 0}</span>
+   515→                  </div>
+   516→                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11 }}>
+   517→                    <span style={{ color: '#EF4444' }}>✕ Overdue</span>
+   518→                    <span style={{ fontWeight: 800 }}>{score?.overdue || 0}</span>
+   519→                  </div>
+   520→                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11 }}>
+   521→                    <span style={{ color: '#EF4444' }}>✕ Rejected</span>
+   522→                    <span style={{ fontWeight: 800 }}>{score?.rejected || 0}</span>
+   523→                  </div>
+   524→                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, borderTop: '1px solid var(--b1)', paddingTop: 6, marginTop: 2 }}>
+   525→                    <span style={{ fontWeight: 800 }}>Total</span>
+   526→                    <span style={{ fontWeight: 900, color: 'var(--g2)' }}>{score?.totalTasks || 0}</span>
+   527→                  </div>
+   528→                </div>
+   529→              </div>
+   530→
+   531→              {/* Read only notice */}
+   532→              <div style={{ marginTop: 12, padding: '8px 12px', borderRadius: 6, background: 'var(--bg2)', fontSize: 10, color: 'var(--t4)', fontWeight: 600, textAlign: 'center' }}>
+   533→                📊 This scorecard is auto-calculated from your task performance. Only Arti Sharma can update Monday Meeting scores.
+   534→              </div>
+   535→            </div>
+   536→          </div>
+   537→        </>
+   538→      )}
+   539→
+   540→    </>
+   541→  )
+   542→}
+   543→

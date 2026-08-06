@@ -1,0 +1,242 @@
+     1→/home/z/my-project/src/app/api/reports/route.ts:7:    const type = request.nextUrl.searchParams.get('type') || 'employee'
+     2→/home/z/my-project/src/app/api/reports/route.ts:33:    // Employee report
+     3→/home/z/my-project/src/app/api/reports/route.ts:34:    if (type === 'employee') {
+     4→/home/z/my-project/src/app/api/reports/route.ts:53:      return NextResponse.json({ type: 'employee', data: report, generatedAt: now.toISOString() })
+     5→/home/z/my-project/src/app/api/auth/route.ts:12:// POST /api/auth - Login endpoint
+     6→/home/z/my-project/src/app/api/employees/route.ts:27:    const employees = await db.user.findMany({
+     7→/home/z/my-project/src/app/api/employees/route.ts:41:    const employeesWithStats = employees.map(emp => {
+     8→/home/z/my-project/src/app/api/employees/route.ts:72:    const totalEmployees = employeesWithStats.length
+     9→/home/z/my-project/src/app/api/employees/route.ts:73:    const activeEmployees = employeesWithStats.filter(e => e.isActive).length
+    10→/home/z/my-project/src/app/api/employees/route.ts:74:    const departments = [...new Set(employeesWithStats.map(e => e.department).filter(Boolean))].length
+    11→/home/z/my-project/src/app/api/employees/route.ts:75:    const onLeave = totalEmployees - activeEmployees
+    12→/home/z/my-project/src/app/api/employees/route.ts:78:      employees: employeesWithStats,
+    13→/home/z/my-project/src/app/api/employees/route.ts:79:      stats: { total: totalEmployees, active: activeEmployees, departments, onLeave },
+    14→/home/z/my-project/src/app/api/employees/route.ts:82:    console.error('Employees GET error:', error)
+    15→/home/z/my-project/src/app/api/employees/route.ts:83:    return NextResponse.json({ error: 'Failed to fetch employees' }, { status: 500 })
+    16→/home/z/my-project/src/app/api/employees/route.ts:99:      return NextResponse.json({ error: 'An employee with this email already exists' }, { status: 400 })
+    17→/home/z/my-project/src/app/api/employees/route.ts:103:    const requestedRole = (role as UserRole) || UserRole.EMPLOYEE
+    18→/home/z/my-project/src/app/api/employees/route.ts:111:    const employee = await db.user.create({
+    19→/home/z/my-project/src/app/api/employees/route.ts:130:          title: `New Employee Added: ${name}`,
+    20→/home/z/my-project/src/app/api/employees/route.ts:137:    return NextResponse.json(employee, { status: 201 })
+    21→/home/z/my-project/src/app/api/employees/route.ts:139:    console.error('Employees POST error:', error)
+    22→/home/z/my-project/src/app/api/employees/route.ts:140:    return NextResponse.json({ error: 'Failed to create employee' }, { status: 500 })
+    23→/home/z/my-project/src/app/api/employees/route.ts:155:      return NextResponse.json({ error: 'Employee not found' }, { status: 404 })
+    24→/home/z/my-project/src/app/api/employees/route.ts:172:    // If deactivating (employee left), create notification
+    25→/home/z/my-project/src/app/api/employees/route.ts:179:            title: `Employee Deactivated: ${user.name}`,
+    26→/home/z/my-project/src/app/api/employees/route.ts:189:    console.error('Employees PATCH error:', error)
+    27→/home/z/my-project/src/app/api/employees/route.ts:190:    return NextResponse.json({ error: 'Failed to update employee' }, { status: 500 })
+    28→/home/z/my-project/src/app/api/employees/route.ts:211:      return NextResponse.json({ error: 'Employee not found' }, { status: 404 })
+    29→/home/z/my-project/src/app/api/employees/route.ts:222:    // Instead of hard deleting, deactivate the employee (soft delete)
+    30→/home/z/my-project/src/app/api/employees/route.ts:235:          title: `Employee Removed: ${user.name}`,
+    31→/home/z/my-project/src/app/api/employees/route.ts:244:    console.error('Employees DELETE error:', error)
+    32→/home/z/my-project/src/app/api/employees/route.ts:245:    return NextResponse.json({ error: 'Failed to remove employee' }, { status: 500 })
+    33→/home/z/my-project/src/app/api/approval-action/route.ts:6:// Complete workflow: Employee Steps → EA Review → Director → EA Final Review → Employee (Final Submit) → Complete
+    34→/home/z/my-project/src/app/api/approval-action/route.ts:95:        } else if (nextStep.name.includes('Employee')) {
+    35→/home/z/my-project/src/app/api/approval-action/route.ts:123:          } else if (nextStep.name.includes('Employee')) {
+    36→/home/z/my-project/src/app/api/approval-action/route.ts:124:            newTaskStatus = WorkflowStatus.IN_PROGRESS // Back to employee
+    37→/home/z/my-project/src/app/api/approval-action/route.ts:141:          } else if (nextStep.name.includes('Employee')) {
+    38→/home/z/my-project/src/app/api/approval-action/route.ts:169:        // Mark workflow as APPROVED and send task back to employee for final submit
+    39→/home/z/my-project/src/app/api/approval-action/route.ts:175:        // Set task back to IN_PROGRESS for employee to do final submit
+    40→/home/z/my-project/src/app/api/approval-action/route.ts:183:        // Notify employee to do final submission
+    41→/home/z/my-project/src/app/api/approval-action/route.ts:204:            reason: 'EA Final approved - workflow complete, task sent back to employee for final submission',
+    42→/home/z/my-project/src/app/api/approval-action/route.ts:236:      // Reset employee workflow step so they can redo
+    43→/home/z/my-project/src/app/api/approval-action/route.ts:237:      const employeeStep = workflow.steps.find(s => s.order === 1)
+    44→/home/z/my-project/src/app/api/approval-action/route.ts:238:      if (employeeStep) {
+    45→/home/z/my-project/src/app/api/approval-action/route.ts:240:          where: { id: employeeStep.id },
+    46→/home/z/my-project/src/app/api/approval-action/route.ts:258:        // Update task status - send back to employee as PENDING
+    47→/home/z/my-project/src/app/api/approval-action/route.ts:265:      // Notify task owner (employee) that their work was rejected
+    48→/home/z/my-project/src/app/api/approval-action/route.ts:286:          reason: comments || `Step "${stepInstance.name}" rejected - sent back to employee`,
+    49→/home/z/my-project/src/app/api/seed/route.ts:13:      { email: 'aditya@laxree.com', name: 'Aditya Sharma', role: UserRole.EMPLOYEE, department: 'Sales' },
+    50→/home/z/my-project/src/app/api/seed/route.ts:15:      { email: 'aakash@laxree.com', name: 'Aakash', role: UserRole.EMPLOYEE, department: 'Sales' },
+    51→/home/z/my-project/src/app/api/seed/route.ts:16:      { email: 'anamika@laxree.com', name: 'Anamika', role: UserRole.EMPLOYEE, department: 'Back Office' },
+    52→/home/z/my-project/src/app/api/seed/route.ts:17:      { email: 'radhika@laxree.com', name: 'Radhika', role: UserRole.EMPLOYEE, department: 'Back Office' },
+    53→/home/z/my-project/src/app/api/seed/route.ts:18:      { email: 'saurabh@laxree.com', name: 'Saurabh', role: UserRole.EMPLOYEE, department: 'Back Office' },
+    54→/home/z/my-project/src/app/api/seed/route.ts:19:      { email: 'ruchi@laxree.com', name: 'Ruchi', role: UserRole.EMPLOYEE, department: 'Back Office' },
+    55→/home/z/my-project/src/app/api/seed/route.ts:20:      { email: 'tanuja@laxree.com', name: 'Tanuja Tigaya', role: UserRole.EMPLOYEE, department: 'Back Office' },
+    56→/home/z/my-project/src/app/api/seed/route.ts:21:      { email: 'aayush@laxree.com', name: 'Aayush', role: UserRole.EMPLOYEE, department: 'Back Office' },
+    57→/home/z/my-project/src/app/api/seed/route.ts:22:      { email: 'kamlesh@laxree.com', name: 'Kamlesh', role: UserRole.EMPLOYEE, department: 'Back Office' },
+    58→/home/z/my-project/src/app/api/seed/route.ts:23:      { email: 'hitesh@laxree.com', name: 'Hitesh Tak', role: UserRole.EMPLOYEE, department: 'Accounts' },
+    59→/home/z/my-project/src/app/api/seed/route.ts:24:      { email: 'meera@laxree.com', name: 'Meera Patel', role: UserRole.EMPLOYEE, department: 'HR' },
+    60→/home/z/my-project/src/app/api/seed/route.ts:25:      { email: 'rajesh@laxree.com', name: 'Rajesh Kumar', role: UserRole.EMPLOYEE, department: 'Coordinator' },
+    61→/home/z/my-project/src/app/page.tsx:16:import { LaxreeLogin } from '@/components/laxree/laxree-login'
+    62→/home/z/my-project/src/app/page.tsx:17:import { LaxreeEmployeeDashboard } from '@/components/laxree/laxree-employee-dashboard'
+    63→/home/z/my-project/src/app/page.tsx:96:      case 'employee-dashboard':
+    64→/home/z/my-project/src/app/page.tsx:97:        return <LaxreeEmployeeDashboard />
+    65→/home/z/my-project/src/app/page.tsx:110:      case 'employees':
+    66→/home/z/my-project/src/app/page.tsx:111:        return <EmployeesView />
+    67→/home/z/my-project/src/app/page.tsx:358:      <div className="ph"><div className="ph-left"><h2>Performance Intelligence</h2><p>Deep-dive employee analytics &amp; comparison engine</p></div></div>
+    68→/home/z/my-project/src/app/page.tsx:429:  const [addForm, setAddForm] = useState({ name: '', email: '', role: 'EMPLOYEE', department: '', designation: '', phone: '', location: '' })
+    69→/home/z/my-project/src/app/page.tsx:438:  const roleBadge: Record<string, string> = { ADMIN: 'b-gold', DIRECTOR: 'b-purple', EA: 'b-blue', MANAGER: 'b-green', EMPLOYEE: 'b-gray' }
+    70→/home/z/my-project/src/app/page.tsx:443:    queryFn: () => fetch('/api/employees').then(r => r.json()),
+    71→/home/z/my-project/src/app/page.tsx:445:  const allUsers = (allUsersData as any)?.employees || []
+    72→/home/z/my-project/src/app/page.tsx:452:    mutationFn: (formData: typeof addForm) => fetch('/api/employees', {
+    73→/home/z/my-project/src/app/page.tsx:456:      if (!r.ok) throw new Error(res.error || 'Failed to add employee')
+    74→/home/z/my-project/src/app/page.tsx:464:      setAddForm({ name: '', email: '', role: 'EMPLOYEE', department: '', designation: '', phone: '', location: '' })
+    75→/home/z/my-project/src/app/page.tsx:469:    mutationFn: (userId: string) => fetch(`/api/employees?userId=${userId}`, {
+    76→/home/z/my-project/src/app/page.tsx:473:      if (!r.ok) throw new Error(res.error || 'Failed to remove employee')
+    77→/home/z/my-project/src/app/page.tsx:485:    mutationFn: (userId: string) => fetch('/api/employees', {
+    78→/home/z/my-project/src/app/page.tsx:507:          <button className="btn btn-gold" onClick={() => setShowAddDialog(true)}>+ Add Employee</button>
+    79→/home/z/my-project/src/app/page.tsx:591:              <div style={{ fontSize: 12, marginTop: 4 }}>Click "+ Add Employee" to add a new team member</div>
+    80→/home/z/my-project/src/app/page.tsx:597:      {/* Add Employee Dialog */}
+    81→/home/z/my-project/src/app/page.tsx:602:            <div className="mt">Add New Employee</div>
+    82→/home/z/my-project/src/app/page.tsx:619:                  <option value="EMPLOYEE">Employee</option>
+    83→/home/z/my-project/src/app/page.tsx:658:                {addMutation.isPending ? 'Adding...' : '✓ Add Employee'}
+    84→/home/z/my-project/src/app/page.tsx:709:   Employees View
+    85→/home/z/my-project/src/app/page.tsx:711:function EmployeesView() {
+    86→/home/z/my-project/src/app/page.tsx:713:  const [addForm, setAddForm] = useState({ name: '', email: '', role: 'EMPLOYEE', department: '', designation: '', phone: '', location: '' })
+    87→/home/z/my-project/src/app/page.tsx:719:    queryKey: ['employees'],
+    88→/home/z/my-project/src/app/page.tsx:720:    queryFn: () => fetch('/api/employees').then(r => r.json()),
+    89→/home/z/my-project/src/app/page.tsx:724:    mutationFn: (formData: typeof addForm) => fetch('/api/employees', {
+    90→/home/z/my-project/src/app/page.tsx:728:      if (!r.ok) throw new Error(res.error || 'Failed to add employee')
+    91→/home/z/my-project/src/app/page.tsx:731:    onSuccess: () => { qc.invalidateQueries({ queryKey: ['employees'] }); setShowAddDialog(false); setAddForm({ name: '', email: '', role: 'EMPLOYEE', department: '', designation: '', phone: '', location: '' }) },
+    92→/home/z/my-project/src/app/page.tsx:735:    mutationFn: (userId: string) => fetch(`/api/employees?userId=${userId}`, { method: 'DELETE' }).then(async r => {
+    93→/home/z/my-project/src/app/page.tsx:740:    onSuccess: () => { qc.invalidateQueries({ queryKey: ['employees'] }); setRemoveConfirm(null) },
+    94→/home/z/my-project/src/app/page.tsx:744:    mutationFn: (userId: string) => fetch('/api/employees', {
+    95→/home/z/my-project/src/app/page.tsx:748:    onSuccess: () => { qc.invalidateQueries({ queryKey: ['employees'] }) },
+    96→/home/z/my-project/src/app/page.tsx:751:  const employees: any[] = (data as any)?.employees || []
+    97→/home/z/my-project/src/app/page.tsx:753:  const activeEmps = employees.filter(e => e.isActive)
+    98→/home/z/my-project/src/app/page.tsx:754:  const inactiveEmps = employees.filter(e => !e.isActive)
+    99→/home/z/my-project/src/app/page.tsx:755:  const displayEmps = empTab === 'active' ? activeEmps : empTab === 'inactive' ? inactiveEmps : employees
+   100→/home/z/my-project/src/app/page.tsx:757:  if (isLoading) return <div style={{ padding: 40, textAlign: 'center', color: 'var(--t3)' }}>Loading employees…</div>
+   101→/home/z/my-project/src/app/page.tsx:762:    { id: 'all', label: 'All', count: employees.length },
+   102→/home/z/my-project/src/app/page.tsx:768:        <div className="ph-left"><h2>Employees</h2><p>Employee directory and management</p></div>
+   103→/home/z/my-project/src/app/page.tsx:771:          <button className="btn btn-gold" onClick={() => setShowAddDialog(true)}>+ Add Employee</button>
+   104→/home/z/my-project/src/app/page.tsx:788:        <div className="ch"><div className="ct">👥 Employee Directory</div><span className="badge b-gold">{employees.length} employees</span></div>
+   105→/home/z/my-project/src/app/page.tsx:838:            <div className="mt">Add Employee</div>
+   106→/home/z/my-project/src/app/page.tsx:846:              <div className="fg"><label>Role</label><select className="fi" value={addForm.role} onChange={e => setAddForm({ ...addForm, role: e.target.value })}><option value="EMPLOYEE">Employee</option><option value="MANAGER">Manager</option><option value="EA">EA</option><option value="DIRECTOR">Director</option></select></div>
+   107→/home/z/my-project/src/app/page.tsx:855:              <button className="btn btn-gold" onClick={() => addMutation.mutate(addForm)} disabled={addMutation.isPending || !addForm.name || !addForm.email}>{addMutation.isPending ? 'Adding...' : '✓ Add Employee'}</button>
+   108→/home/z/my-project/src/app/page.tsx:923:      <div className="ph"><div className="ph-left"><h2>Scorecards</h2><p>Employee performance scorecard overview</p></div></div>
+   109→/home/z/my-project/src/app/page.tsx:999:  // Login gate — show login page if not authenticated
+   110→/home/z/my-project/src/app/page.tsx:1001:    return <LaxreeLogin />
+   111→/home/z/my-project/src/stores/workflow-store.ts:3:type ActiveView = 'dashboard' | 'workflows' | 'tasks' | 'notifications' | 'executive' | 'analytics' | 'performance' | 'departments' | 'team' | 'escalations' | 'cancelled' | 'categories' | 'director-dependency' | 'employees' | 'projects' | 'reports' | 'scorecards' | 'settings' | 'monday' | 'dirDep' | 'exthold' | 'employee-dashboard' | 'leaves'
+   112→/home/z/my-project/src/stores/workflow-store.ts:5:type UserRole = 'ADMIN' | 'DIRECTOR' | 'EA' | 'MANAGER' | 'EMPLOYEE'
+   113→/home/z/my-project/src/stores/workflow-store.ts:62:  login: (username: string, password: string) => boolean
+   114→/home/z/my-project/src/stores/workflow-store.ts:71:  currentRole: 'EMPLOYEE' as UserRole,
+   115→/home/z/my-project/src/stores/workflow-store.ts:134:  login: (username: string, password: string) => {
+   116→/home/z/my-project/src/stores/workflow-store.ts:140:      // Employee logins — username = first name lowercase, password = Name@2025
+   117→/home/z/my-project/src/stores/workflow-store.ts:141:      aditya: { password: 'Aditya@2025', role: 'EMPLOYEE', name: 'Aditya Sharma', userId: 'user-emp1' },
+   118→/home/z/my-project/src/stores/workflow-store.ts:142:      aakash: { password: 'Aakash@2025', role: 'EMPLOYEE', name: 'Aakash', userId: 'user-emp2' },
+   119→/home/z/my-project/src/stores/workflow-store.ts:143:      anamika: { password: 'Anamika@2025', role: 'EMPLOYEE', name: 'Anamika', userId: 'user-emp3' },
+   120→/home/z/my-project/src/stores/workflow-store.ts:144:      saurabh: { password: 'Saurabh@2025', role: 'EMPLOYEE', name: 'Saurabh', userId: 'user-emp4' },
+   121→/home/z/my-project/src/stores/workflow-store.ts:145:      ruchi: { password: 'Ruchi@2025', role: 'EMPLOYEE', name: 'Ruchi', userId: 'user-emp5' },
+   122→/home/z/my-project/src/stores/workflow-store.ts:146:      aayush: { password: 'Aayush@2025', role: 'EMPLOYEE', name: 'Aayush', userId: 'user-emp6' },
+   123→/home/z/my-project/src/stores/workflow-store.ts:147:      kamlesh: { password: 'Kamlesh@2025', role: 'EMPLOYEE', name: 'Kamlesh', userId: 'user-emp7' },
+   124→/home/z/my-project/src/stores/workflow-store.ts:148:      hitesh: { password: 'Hitesh@2025', role: 'EMPLOYEE', name: 'Hitesh Tak', userId: 'user-emp8' },
+   125→/home/z/my-project/src/app/globals.css:626:/* ══ LOGIN CARD ══ */
+   126→/home/z/my-project/src/app/globals.css:646:/* ══ LOGIN FORM ══ */
+   127→/home/z/my-project/src/components/app-sidebar.tsx:49:          id: 'employees',
+   128→/home/z/my-project/src/components/app-sidebar.tsx:50:          label: 'Employees',
+   129→/home/z/my-project/src/components/app-sidebar.tsx:51:          view: 'employees',
+   130→/home/z/my-project/src/components/approval-list.tsx:196:          <div style={{ background: 'var(--blue-l)', color: 'var(--blue)', padding: '6px 12px', borderRadius: 8, fontSize: 11, fontWeight: 800, border: '1px solid rgba(29,78,216,.15)' }}>👤 Employee</div>
+   131→/home/z/my-project/src/components/app-header.tsx:50:      setCurrentRole((currentUser.role as any) || 'EMPLOYEE')
+   132→/home/z/my-project/src/components/app-header.tsx:67:    setCurrentRole((user.role as any) || 'EMPLOYEE')
+   133→/home/z/my-project/src/components/app-header.tsx:76:    EMPLOYEE: 'var(--t3)',
+   134→/home/z/my-project/src/components/app-header.tsx:127:            fontSize: '11.5px', fontWeight: 700, color: roleColors[currentUser?.role || 'EMPLOYEE'] || 'var(--g2)',
+   135→/home/z/my-project/src/components/workflow-dashboard.tsx:182:            <div className="ext-hold-sub">Employee work is done but waiting on external action</div>
+   136→/home/z/my-project/src/components/laxree/laxree-cmd-palette.tsx:18:  { label: 'My Dashboard', icon: '👤', page: 'employee-dashboard' as const, key: '' },
+   137→/home/z/my-project/src/components/task-list.tsx:71:  const [employeeFilter, setEmployeeFilter] = useState('')
+   138→/home/z/my-project/src/components/task-list.tsx:238:      if (employeeFilter && t.ownerId !== employeeFilter) return false
+   139→/home/z/my-project/src/components/task-list.tsx:256:  }, [tasks, searchQuery, priorityFilter, employeeFilter, categoryFilter, deptFilter, activeTab, isCancelledView])
+   140→/home/z/my-project/src/components/task-list.tsx:281:    setEmployeeFilter('')
+   141→/home/z/my-project/src/components/task-list.tsx:286:  const hasFilters = searchQuery || priorityFilter || employeeFilter || categoryFilter || deptFilter
+   142→/home/z/my-project/src/components/task-list.tsx:345:      return { canAct: true, stepId: activeStep.id, stepName: 'EA Final Review', actionLabel: 'Submit to Employee', workflowId: task.workflow.id }
+   143→/home/z/my-project/src/components/task-list.tsx:436:            <select className="sel" value={employeeFilter} onChange={e => setEmployeeFilter(e.target.value)} style={{ minWidth: 130 }}>
+   144→/home/z/my-project/src/components/task-list.tsx:437:              <option value="">Employee</option>
+   145→/home/z/my-project/src/components/task-list.tsx:881:                  <div style={{ background: 'var(--blue-l)', color: 'var(--blue)', padding: '4px 8px', borderRadius: 6, fontSize: 10, fontWeight: 800 }}>Employee</div>
+   146→/home/z/my-project/src/components/laxree/laxree-sidebar.tsx:6:type ActivePage = 'dashboard' | 'executive' | 'tasks' | 'cancelled' | 'analytics' | 'performance' | 'departments' | 'team' | 'categories' | 'exthold' | 'monday' | 'escalations' | 'employee-dashboard' | 'leaves'
+   147→/home/z/my-project/src/components/laxree/laxree-sidebar.tsx:93:  // Show employee dashboard option for EMPLOYEE role
+   148→/home/z/my-project/src/components/laxree/laxree-sidebar.tsx:94:  const employeeSection: NavItem[] = [
+   149→/home/z/my-project/src/components/laxree/laxree-sidebar.tsx:96:      id: 'employee-dashboard', label: 'My Dashboard',
+   150→/home/z/my-project/src/components/laxree/laxree-sidebar.tsx:105:  const isEmployee = currentUser?.role === 'EMPLOYEE' || currentUser?.role === 'MANAGER' || currentUser?.role === 'DIRECTOR'
+   151→/home/z/my-project/src/components/laxree/laxree-sidebar.tsx:106:  const sections = isEmployee ? [
+   152→/home/z/my-project/src/components/laxree/laxree-sidebar.tsx:107:    { label: 'My Space', items: employeeSection },
+   153→/home/z/my-project/src/components/laxree/laxree-leave-management.tsx:22:  // Fetch all employees for delegation view
+   154→/home/z/my-project/src/components/laxree/laxree-leave-management.tsx:23:  const { data: employeesData = { employees: [] } } = useQuery({
+   155→/home/z/my-project/src/components/laxree/laxree-leave-management.tsx:24:    queryKey: ['employees-leaves'],
+   156→/home/z/my-project/src/components/laxree/laxree-leave-management.tsx:25:    queryFn: () => fetch('/api/employees?status=active').then(r => r.json()),
+   157→/home/z/my-project/src/components/laxree/laxree-leave-management.tsx:29:  const employees = employeesData.employees || []
+   158→/home/z/my-project/src/components/laxree/laxree-leave-management.tsx:31:  // Get currently-on-leave employees (approved leaves where today falls in range)
+   159→/home/z/my-project/src/components/laxree/laxree-leave-management.tsx:43:  // Delegation data: map employee → leave info
+   160→/home/z/my-project/src/components/laxree/laxree-leave-management.tsx:44:  const leaveByEmployee: Record<string, any> = {}
+   161→/home/z/my-project/src/components/laxree/laxree-leave-management.tsx:46:    leaveByEmployee[leave.userId] = leave
+   162→/home/z/my-project/src/components/laxree/laxree-leave-management.tsx:50:  const pendingByEmployee: Record<string, any> = {}
+   163→/home/z/my-project/src/components/laxree/laxree-leave-management.tsx:52:    if (!pendingByEmployee[leave.userId]) pendingByEmployee[leave.userId] = []
+   164→/home/z/my-project/src/components/laxree/laxree-leave-management.tsx:53:    pendingByEmployee[leave.userId].push(leave)
+   165→/home/z/my-project/src/components/laxree/laxree-leave-management.tsx:98:          <p>Review and manage employee leave applications</p>
+   166→/home/z/my-project/src/components/laxree/laxree-leave-management.tsx:151:                {currentlyOnLeave.length} employee{currentlyOnLeave.length !== 1 ? 's' : ''}
+   167→/home/z/my-project/src/components/laxree/laxree-leave-management.tsx:157:                  <div style={{ fontWeight: 700 }}>No employees on leave today</div>
+   168→/home/z/my-project/src/components/laxree/laxree-leave-management.tsx:163:                      <tr><th>Employee</th><th>Department</th><th>Leave Type</th><th>From</th><th>To</th><th>Tag</th><th>Days</th></tr>
+   169→/home/z/my-project/src/components/laxree/laxree-leave-management.tsx:198:          {/* All active employees with leave status */}
+   170→/home/z/my-project/src/components/laxree/laxree-leave-management.tsx:202:              <span className="badge b-gold" style={{ fontSize: 10 }}>{employees.length} active</span>
+   171→/home/z/my-project/src/components/laxree/laxree-leave-management.tsx:208:                    <tr><th>Employee</th><th>Department</th><th>Leave Status</th><th>Tag</th><th>Details</th></tr>
+   172→/home/z/my-project/src/components/laxree/laxree-leave-management.tsx:211:                    {employees.map((emp: any) => {
+   173→/home/z/my-project/src/components/laxree/laxree-leave-management.tsx:212:                      const isOnLeave = !!leaveByEmployee[emp.id]
+   174→/home/z/my-project/src/components/laxree/laxree-leave-management.tsx:213:                      const leaveInfo = leaveByEmployee[emp.id]
+   175→/home/z/my-project/src/components/laxree/laxree-leave-management.tsx:214:                      const pendingLeaves = pendingByEmployee[emp.id] || []
+   176→/home/z/my-project/src/components/laxree/laxree-approvals.tsx:88:  // Tasks approved by all, waiting for employee final submit
+   177→/home/z/my-project/src/components/laxree/laxree-approvals.tsx:138:    // Director rejects → return to employee
+   178→/home/z/my-project/src/components/laxree/laxree-approvals.tsx:174:    // EA Final approves → send back to employee for final submit
+   179→/home/z/my-project/src/components/laxree/laxree-approvals.tsx:185:        comments: comment || 'EA Final approved - ready for employee submission',
+   180→/home/z/my-project/src/components/laxree/laxree-approvals.tsx:192:    // EA Final rejects → return to employee
+   181→/home/z/my-project/src/components/laxree/laxree-approvals.tsx:276:              const shortName = ws.name.replace('Employee Task Completion', 'Employee').replace('EA Review & Verification', 'EA Review').replace('Director Approval', 'Director').replace('EA Final Review & Submit', 'EA Final')
+   182→/home/z/my-project/src/components/laxree/laxree-approvals.tsx:300:                  // EA rejects - send back to employee
+   183→/home/z/my-project/src/components/laxree/laxree-approvals.tsx:312:                  ↩ Return to Employee
+   184→/home/z/my-project/src/components/laxree/laxree-approvals.tsx:339:                  ✕ Reject & Return to Employee
+   185→/home/z/my-project/src/components/laxree/laxree-approvals.tsx:359:                  ✓ Final Approve & Send to Employee
+   186→/home/z/my-project/src/components/laxree/laxree-approvals.tsx:362:                  ✕ Reject & Return to Employee
+   187→/home/z/my-project/src/components/laxree/laxree-approvals.tsx:377:            ✅ All approvals done. Waiting for employee to do final submit.
+   188→/home/z/my-project/src/components/laxree/laxree-approvals.tsx:424:            <div className="alert-sub">Employee steps with director dependency are waiting for your verification</div>
+   189→/home/z/my-project/src/components/laxree/laxree-command-palette.tsx:18:  { id: 'employee-dashboard', label: 'My Dashboard', section: 'Navigation', icon: '👤' },
+   190→/home/z/my-project/src/components/laxree/laxree-task-detail.tsx:117:            <span className={`wf-stage ${task.workflow?.status === 'APPROVED' ? 'wf-stage-dir' : task.status === 'COMPLETED' ? 'wf-stage-done' : ''}`}>Employee Submit</span>
+   191→/home/z/my-project/src/components/laxree/laxree-task-detail.tsx:154:              <button className="dd-btn-dir-reject" onClick={() => handleStatusChange('PENDING')}>✗ Reject & Return to Employee</button>
+   192→/home/z/my-project/src/components/laxree/laxree-task-detail.tsx:161:              <button className="dd-btn-dir-reject" onClick={() => handleStatusChange('PENDING')}>✗ Reject & Return to Employee</button>
+   193→/home/z/my-project/src/components/laxree/laxree-tasks.tsx:153:  // EMPLOYEE/MANAGER/DIRECTOR: Only see tasks assigned to them
+   194→/home/z/my-project/src/components/laxree/laxree-tasks.tsx:463:                        {/* EMPLOYEE/MANAGER/DIRECTOR: Read-only status badge */}
+   195→/home/z/my-project/src/components/laxree/laxree-tasks.tsx:758:                  {/* EMPLOYEE/MANAGER/DIRECTOR: Read-only notice */}
+   196→/home/z/my-project/src/components/laxree/laxree-employee-dashboard.tsx:7:export function LaxreeEmployeeDashboard() {
+   197→/home/z/my-project/src/components/laxree/laxree-employee-dashboard.tsx:18:  // Fetch employee's tasks (read-only) — ONLY tasks assigned to this employee
+   198→/home/z/my-project/src/components/laxree/laxree-employee-dashboard.tsx:25:  // Fetch employee's leaves
+   199→/home/z/my-project/src/components/laxree/laxree-employee-dashboard.tsx:77:          <p>Welcome, {currentUserName || 'Employee'}</p>
+   200→/home/z/my-project/src/components/laxree/laxree-dir-dependency.tsx:123:    else if (action === 'REJECT') newStatus = 'PENDING' // send back to employee
+   201→/home/z/my-project/src/components/laxree/laxree-dir-dependency.tsx:164:                ↩ Reject & Return to Employee
+   202→/home/z/my-project/src/components/laxree/laxree-dir-dependency.tsx:177:                ✕ Reject & Return to Employee
+   203→/home/z/my-project/src/components/laxree/laxree-dir-dependency.tsx:184:                ✓ Submit to Employee
+   204→/home/z/my-project/src/components/laxree/laxree-dir-dependency.tsx:187:                ↩ Return to Employee
+   205→/home/z/my-project/src/components/laxree/laxree-dir-dependency.tsx:240:            ✕ Reject & Return to Employee
+   206→/home/z/my-project/src/components/laxree/laxree-dir-dependency.tsx:311:            ↩ Return to Employee
+   207→/home/z/my-project/src/components/laxree/laxree-dir-dependency.tsx:344:          <div style={{ background: 'var(--blue-l)', color: 'var(--blue)', padding: '5px 10px', borderRadius: 7, fontSize: 10, fontWeight: 800 }}>👤 Employee</div>
+   208→/home/z/my-project/src/components/laxree/laxree-dir-dependency.tsx:352:          <div style={{ background: 'var(--blue-l)', color: 'var(--blue)', padding: '5px 10px', borderRadius: 7, fontSize: 10, fontWeight: 800 }}>👤 Employee Continue</div>
+   209→/home/z/my-project/src/components/laxree/laxree-dir-dependency.tsx:457:                        ✓ Submit to Employee
+   210→/home/z/my-project/src/components/laxree/laxree-dir-dependency.tsx:469:                        ↩ Return to Employee
+   211→/home/z/my-project/src/components/laxree/laxree-login.tsx:6:export function LaxreeLogin() {
+   212→/home/z/my-project/src/components/laxree/laxree-login.tsx:7:  const { login } = useWorkflowStore()
+   213→/home/z/my-project/src/components/laxree/laxree-login.tsx:13:  const handleLogin = () => {
+   214→/home/z/my-project/src/components/laxree/laxree-login.tsx:18:    const success = login(username, password)
+   215→/home/z/my-project/src/components/laxree/laxree-login.tsx:49:            onKeyDown={e => e.key === 'Enter' && handleLogin()} />
+   216→/home/z/my-project/src/components/laxree/laxree-login.tsx:55:            onKeyDown={e => e.key === 'Enter' && handleLogin()} />
+   217→/home/z/my-project/src/components/laxree/laxree-login.tsx:57:        <button className="lf-btn" onClick={handleLogin}>Sign In to LOS</button>
+   218→/home/z/my-project/src/components/laxree/laxree-login.tsx:65:        <div className="lf-hint">Admin: admin / Laxree@2025 · EA: ea / EA@Laxree · Directors: ashish / Ashish@2025 · samarth / Samarth@2025 · Employees: aditya / Aditya@2025 · aakash / Aakash@2025</div>
+   219→/home/z/my-project/src/components/laxree/laxree-monday.tsx:190:  // Fetch users (employees only - no directors)
+   220→/home/z/my-project/src/components/laxree/laxree-monday.tsx:197:  // Filter users: employees, managers, EA, admin - exclude directors
+   221→/home/z/my-project/src/components/laxree/laxree-monday.tsx:640:                    {/* This Week Score Row — what employee committed in previous Monday meeting */}
+   222→/home/z/my-project/src/components/laxree/laxree-monday.tsx:785:                    {/* Next Week Plan Row — editable, employee commits for next week */}
+   223→/home/z/my-project/src/components/laxree/laxree-team.tsx:11:  const [addForm, setAddForm] = useState({ name: '', email: '', role: 'EMPLOYEE', department: '', designation: '', phone: '', location: '' })
+   224→/home/z/my-project/src/components/laxree/laxree-team.tsx:22:    queryFn: () => fetch('/api/employees').then(r => r.json()),
+   225→/home/z/my-project/src/components/laxree/laxree-team.tsx:29:  const allUsers = (allUsersData as any)?.employees || []
+   226→/home/z/my-project/src/components/laxree/laxree-team.tsx:36:  const roleBadge: Record<string, string> = { ADMIN: 'b-gold', DIRECTOR: 'b-purple', EA: 'b-green', MANAGER: 'b-blue', EMPLOYEE: 'b-gray' }
+   227→/home/z/my-project/src/components/laxree/laxree-team.tsx:39:    mutationFn: (formData: typeof addForm) => fetch('/api/employees', {
+   228→/home/z/my-project/src/components/laxree/laxree-team.tsx:43:      if (!r.ok) throw new Error(res.error || 'Failed to add employee')
+   229→/home/z/my-project/src/components/laxree/laxree-team.tsx:49:      addToast('ok', 'Employee added successfully')
+   230→/home/z/my-project/src/components/laxree/laxree-team.tsx:51:      setAddForm({ name: '', email: '', role: 'EMPLOYEE', department: '', designation: '', phone: '', location: '' })
+   231→/home/z/my-project/src/components/laxree/laxree-team.tsx:53:    onError: (err: any) => addToast('err', err.message || 'Failed to add employee'),
+   232→/home/z/my-project/src/components/laxree/laxree-team.tsx:57:    mutationFn: (userId: string) => fetch(`/api/employees?userId=${userId}`, { method: 'DELETE' }).then(async r => {
+   233→/home/z/my-project/src/components/laxree/laxree-team.tsx:65:      addToast('ok', data.message || 'Employee removed')
+   234→/home/z/my-project/src/components/laxree/laxree-team.tsx:68:    onError: (err: any) => addToast('err', err.message || 'Failed to remove employee'),
+   235→/home/z/my-project/src/components/laxree/laxree-team.tsx:72:    mutationFn: (userId: string) => fetch('/api/employees', {
+   236→/home/z/my-project/src/components/laxree/laxree-team.tsx:79:      addToast('ok', 'Employee reactivated')
+   237→/home/z/my-project/src/components/laxree/laxree-team.tsx:98:          <button className="btn btn-gold" onClick={() => setShowAddDialog(true)}>+ Add Employee</button>
+   238→/home/z/my-project/src/components/laxree/laxree-team.tsx:120:              <div style={{ fontSize: 12, marginTop: 4 }}>Click "+ Add Employee" to add a new team member</div>
+   239→/home/z/my-project/src/components/laxree/laxree-team.tsx:192:      {/* Add Employee Dialog */}
+   240→/home/z/my-project/src/components/laxree/laxree-team.tsx:197:            <div className="mt">Add New Employee</div>
+   241→/home/z/my-project/src/components/laxree/laxree-team.tsx:214:                  <option value="EMPLOYEE">Employee</option>
+   242→/home/z/my-project/src/components/laxree/laxree-team.tsx:253:                {addMutation.isPending ? 'Adding...' : '✓ Add Employee'}

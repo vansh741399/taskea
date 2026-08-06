@@ -1,0 +1,551 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DATABASE_URL")
+}
+
+model User {
+  id            String   @id @default(cuid())
+  email         String   @unique
+  name          String
+  role          String   @default("EMPLOYEE")
+  department    String?
+  designation   String?
+  phone         String?
+  location      String?
+  avatar        String?
+  loginUsername  String?  @unique
+  loginPassword  String?
+  isActive      Boolean  @default(true)
+  joinDate      DateTime?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  // v25·0801: HRMS integration — stable cross-system identifier
+  hrmsId        String?
+  // v25·0801: Assigned office for punch-in geofencing (Ajmer/Jaipur/Gurugram)
+  officeId      String?
+
+  createdWorkflows    WorkflowInstance[]  @relation("WorkflowCreator")
+  assignedSteps       StepInstance[]      @relation("StepAssignee")
+  approvals          Approval[]          @relation("ApprovalUser")
+  sentNotifications  Notification[]      @relation("NotificationSender")
+  receivedNotifications Notification[]   @relation("NotificationReceiver")
+  delegatedTo        Delegation[]        @relation("DelegatedTo")
+  delegatedFrom      Delegation[]        @relation("DelegatedFrom")
+  comments           Comment[]           @relation("CommentAuthor")
+  tasks              Task[]              @relation("TaskOwner")
+  assignedTasks      Task[]              @relation("TaskAssignedBy")  // Tasks this user (director) assigned
+  assignedTaskSteps  TaskStep[]          @relation("StepAssigneeTask")
+  managedProjects    Project[]           @relation("ProjectManager")
+  deptHead           Department[]        @relation("DeptHead")
+  mondayMeetings     MondayMeeting[]     @relation("MondayMeetingUser")
+  leaves             Leave[]             @relation("UserLeaves")
+  approvedLeaves     Leave[]             @relation("LeaveApprover")
+  taskActivities     TaskActivity[]      @relation("TaskActivityActor")
+  // v24·0625: Attendance queries raised by this user (HRMS bridge)
+  attendanceQueries  AttendanceQuery[]   @relation("AttendanceQueryUser")
+  // v25·0627: Task attachments uploaded by this user (audit trail)
+  uploadedAttachments TaskAttachment[]   @relation("TaskAttachmentUploader")
+  // v25·0801: Punch-in/out records (geofenced attendance)
+  punchRecords       PunchRecord[]       @relation("PunchUser")
+  // v25·0801: Office this user is assigned to (for geofencing)
+  office             OfficeLocation?     @relation("OfficeUsers", fields: [officeId], references: [id])
+}
+
+// v25·0801: Office locations for geofenced punch-in/out
+model OfficeLocation {
+  id          String   @id @default(cuid())
+  name        String   @unique          // e.g. "Ajmer Office", "Jaipur Office", "Gurugram Office"
+  address     String                     // Full postal address
+  city        String                     // Ajmer / Jaipur / Gurugram
+  latitude    Float                      // Google Maps coordinates
+  longitude   Float
+  radiusMeters Int      @default(100)    // Geofence radius (100m default)
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  users       User[]                     @relation("OfficeUsers")
+  punchRecords PunchRecord[]             @relation("PunchOffice")
+}
+
+// v25·0801: Punch-in/punch-out records with geofence verification
+model PunchRecord {
+  id          String   @id @default(cuid())
+  userId      String
+  officeId    String
+  punchIn     DateTime                  // First punch of the day
+  punchOut    DateTime?                  // Last punch of the day (null if still punched in)
+  // Location at punch-in time
+  punchInLat  Float
+  punchInLng  Float
+  punchInAccuracy Float?                 // GPS accuracy in meters
+  punchInDistance Float                  // Distance from office in meters
+  // Location at punch-out time
+  punchOutLat Float?
+  punchOutLng Float?
+  punchOutAccuracy Float?
+  punchOutDistance Float?
+  // Metadata
+  punchInDevice String?                  // User agent / device info
+  punchOutDevice String?
+  punchInNote  String?
+  punchOutNote String?
+  // Status: COMPLETE (both in/out), IN_PROGRESS (only punch-in)
+  status      String   @default("IN_PROGRESS")
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  user        User     @relation("PunchUser", fields: [userId], references: [id])
+  office      OfficeLocation @relation("PunchOffice", fields: [officeId], references: [id])
+
+  @@index([userId, punchIn])
+  @@index([officeId, punchIn])
+  @@index([status])
+}
+
+model Department {
+  id          String   @id @default(cuid())
+  name        String   @unique
+  description String?
+  headId      String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  head        User?    @relation("DeptHead", fields: [headId], references: [id])
+  projects    Project[]
+}
+
+model WorkflowTemplate {
+  id          String   @id @default(cuid())
+  name        String
+  description String?
+  category    String?
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  steps       StepTemplate[]
+  instances   WorkflowInstance[]
+}
+
+model StepTemplate {
+  id              String   @id @default(cuid())
+  templateId      String
+  name            String
+  stepType        String
+  order           Int
+  assigneeRole    String?
+  approvalLevel   Int      @default(1)
+  slaHours        Int?
+  isParallel      Boolean  @default(false)
+  conditionExpr   String?
+  nextStepId      String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  template        WorkflowTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade)
+  instances       StepInstance[]
+}
+
+model WorkflowInstance {
+  id              String   @id @default(cuid())
+  templateId      String
+  title           String
+  description     String?
+  status          String   @default("DRAFT")
+  priority        String   @default("MEDIUM")
+  currentStepOrder Int    @default(0)
+  dueDate         DateTime?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  template        WorkflowTemplate @relation(fields: [templateId], references: [id])
+  creator         User            @relation("WorkflowCreator", fields: [creatorId], references: [id])
+  creatorId       String
+  steps           StepInstance[]
+  approvals       Approval[]
+  tasks           Task[]
+  statusHistory   StatusHistory[]
+  escalationLogs  EscalationLog[]
+  comments        Comment[]
+}
+
+model StepInstance {
+  id              String    @id @default(cuid())
+  workflowId      String
+  stepTemplateId  String
+  name            String
+  stepType        String
+  order           Int
+  status          String    @default("PENDING")
+  assigneeId      String?
+  startedAt       DateTime?
+  completedAt     DateTime?
+  slaDeadline     DateTime?
+  isEscalated     Boolean   @default(false)
+  remarks         String?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  workflow        WorkflowInstance @relation(fields: [workflowId], references: [id], onDelete: Cascade)
+  stepTemplate    StepTemplate     @relation(fields: [stepTemplateId], references: [id])
+  assignee        User?            @relation("StepAssignee", fields: [assigneeId], references: [id])
+  approvals       Approval[]
+}
+
+model Approval {
+  id              String   @id @default(cuid())
+  stepInstanceId  String
+  workflowId      String
+  approverId      String
+  action          String
+  comments        String?
+  level           Int      @default(1)
+  isDelegated     Boolean  @default(false)
+  originalApproverId String?
+  createdAt       DateTime @default(now())
+
+  stepInstance    StepInstance   @relation(fields: [stepInstanceId], references: [id], onDelete: Cascade)
+  workflow        WorkflowInstance @relation(fields: [workflowId], references: [id], onDelete: Cascade)
+  approver        User           @relation("ApprovalUser", fields: [approverId], references: [id])
+}
+
+model Task {
+  id              String    @id @default(cuid())
+  workflowId      String?
+  title           String
+  description     String?
+  status          String    @default("PENDING")
+  priority        String    @default("MEDIUM")
+  ownerId         String
+  assignedById    String?  // Director who assigned the task (Samarth Sir / Ashish Sir)
+  department      String?
+  category        String?
+  dueDate         DateTime?
+  parentTaskId    String?
+  completedAt     DateTime?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  workflow        WorkflowInstance? @relation(fields: [workflowId], references: [id])
+  owner           User              @relation("TaskOwner", fields: [ownerId], references: [id])
+  assignedBy      User?             @relation("TaskAssignedBy", fields: [assignedById], references: [id])
+  parentTask      Task?             @relation("TaskChildren", fields: [parentTaskId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  subTasks        Task[]            @relation("TaskChildren")
+  dependencies    TaskDependency[]  @relation("TaskDependsOn")
+  dependents      TaskDependency[]  @relation("TaskRequiredBy")
+  taskSteps       TaskStep[]
+  projectId       String?
+  project         Project?          @relation(fields: [projectId], references: [id])
+  frequency       String?
+  weekDays        String?
+  monthDates      String?
+  directorDependency String?
+
+  // Revise tracking
+  reviseReason    String?
+  reviseNextDate  DateTime?
+  revisedAt       DateTime?
+  reviseCount     Int       @default(0)  // Incremented every time the task is revised (used for strict score penalty)
+
+  // Performance score
+  score           Float?
+
+  // ─── v25·0627 — Task Attachments (relation) ───────────────────────────
+  // A task can have 0..N attached files (images, PDFs, docs, excel, any file).
+  // Stored as raw bytes in DB so the feature works on Vercel without any
+  // external object-storage dependency. Existing tasks simply have zero
+  // attachments until files are uploaded — NO migration of existing rows.
+  attachments     TaskAttachment[]
+}
+
+// ═══════════════════════════════════════════════════════════
+// v25·0627 — TASK ATTACHMENT
+// ═══════════════════════════════════════════════════════════
+// Purely ADDITIVE model — does NOT touch any existing table or row.
+// Files are stored as raw bytes (Bytes type → BYTEA in Postgres) so the
+// feature works on Vercel/serverless without external object storage.
+//
+// Columns:
+//   id          — cuid primary key
+//   taskId      — FK → Task.id (cascade on delete so attachments are
+//                 cleaned up automatically when a task is deleted)
+//   fileName    — original file name as uploaded by the user
+//   fileType    — MIME type (e.g. image/png, application/pdf)
+//   fileSize    — file size in bytes (for UI display)
+//   fileData    — raw file content (BYTEA)
+//   uploadedById— optional, the user who uploaded (for audit)
+//   createdAt   — auto timestamp
+//
+// No data from existing tables is read or modified — only new rows are
+// inserted here when users upload attachments to a task.
+model TaskAttachment {
+  id           String   @id @default(cuid())
+  taskId       String
+  fileName     String
+  fileType     String   @default("application/octet-stream")
+  fileSize     Int      @default(0)
+  fileData     Bytes
+  uploadedById String?
+  createdAt    DateTime @default(now())
+
+  task         Task     @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  uploadedBy   User?    @relation("TaskAttachmentUploader", fields: [uploadedById], references: [id], onDelete: SetNull, onUpdate: Restrict)
+
+  @@index([taskId])
+  @@index([createdAt])
+}
+
+model TaskStep {
+  id                    String    @id @default(cuid())
+  taskId                String
+  title                 String
+  status                String    @default("PENDING")
+  order                 Int       @default(0)
+  assigneeId            String?
+  dueDate               DateTime?
+  completedAt           DateTime?
+  needsDirectorApproval Boolean   @default(false)
+  directorName          String?
+  directorNote          String?
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
+
+  task        Task           @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  assignee    User?          @relation("StepAssigneeTask", fields: [assigneeId], references: [id], onDelete: SetNull, onUpdate: Restrict)
+}
+
+model Category {
+  id          String   @id @default(cuid())
+  name        String   @unique
+  color       String?
+  icon        String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model TaskDependency {
+  id              String   @id @default(cuid())
+  taskId          String
+  dependsOnTaskId String
+  dependencyType  String   @default("FINISH_TO_START")
+  createdAt       DateTime @default(now())
+
+  task            Task     @relation("TaskDependsOn", fields: [taskId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  dependsOnTask   Task     @relation("TaskRequiredBy", fields: [dependsOnTaskId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+}
+
+model Notification {
+  id          String    @id @default(cuid())
+  type        String
+  title       String
+  message     String
+  senderId    String?
+  receiverId  String
+  workflowId  String?
+  isRead      Boolean   @default(false)
+  readAt      DateTime?
+  createdAt   DateTime  @default(now())
+
+  sender      User?            @relation("NotificationSender", fields: [senderId], references: [id])
+  receiver    User             @relation("NotificationReceiver", fields: [receiverId], references: [id])
+}
+
+model EscalationLog {
+  id              String   @id @default(cuid())
+  workflowId      String
+  fromStepOrder   Int
+  toStepOrder     Int
+  fromAssigneeId  String?
+  toAssigneeId    String?
+  reason          String
+  slaBreached     Boolean  @default(false)
+  createdAt       DateTime @default(now())
+
+  workflow        WorkflowInstance @relation(fields: [workflowId], references: [id], onDelete: Cascade)
+}
+
+model StatusHistory {
+  id          String   @id @default(cuid())
+  workflowId  String
+  fromStatus  String
+  toStatus    String
+  changedBy   String?
+  reason      String?
+  createdAt   DateTime @default(now())
+
+  workflow    WorkflowInstance @relation(fields: [workflowId], references: [id], onDelete: Cascade)
+}
+
+model Delegation {
+  id          String    @id @default(cuid())
+  fromUserId  String
+  toUserId    String
+  startDate   DateTime
+  endDate     DateTime?
+  isActive    Boolean   @default(true)
+  reason      String?
+  createdAt   DateTime  @default(now())
+
+  fromUser    User     @relation("DelegatedFrom", fields: [fromUserId], references: [id])
+  toUser      User     @relation("DelegatedTo", fields: [toUserId], references: [id])
+}
+
+model Comment {
+  id          String   @id @default(cuid())
+  workflowId  String
+  authorId    String
+  content     String
+  createdAt   DateTime @default(now())
+
+  workflow    WorkflowInstance @relation(fields: [workflowId], references: [id], onDelete: Cascade)
+  author      User             @relation("CommentAuthor", fields: [authorId], references: [id])
+}
+
+model Project {
+  id          String    @id @default(cuid())
+  name        String
+  description String?
+  department  String?
+  managerId   String?
+  status      String    @default("PENDING")
+  priority    String    @default("MEDIUM")
+  startDate   DateTime?
+  endDate     DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  manager     User?          @relation("ProjectManager", fields: [managerId], references: [id])
+  dept        Department?    @relation(fields: [department], references: [name])
+  tasks       Task[]
+}
+
+model Leave {
+  id              String    @id @default(cuid())
+  userId          String
+  leaveType       String    @default("CASUAL")
+  fromDate        DateTime
+  toDate          DateTime
+  reason          String
+  status          String    @default("PENDING")
+  // AL = Applied on time (1 day before), LA = Late Application (same day)
+  applicationTag  String    @default("AL")
+  // EA remark when approving/rejecting
+  eaRemark        String?
+  approvedById    String?
+  approvedAt      DateTime?
+  totalDays       Float     @default(1)
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  user            User      @relation("UserLeaves", fields: [userId], references: [id])
+  approvedBy      User?     @relation("LeaveApprover", fields: [approvedById], references: [id])
+}
+
+model MondayMeeting {
+  id              String   @id @default(cuid())
+  userId          String
+  weekStartDate   DateTime
+  weekEndDate     DateTime
+  weekNumber      Int
+  year            Int
+  // This Week Plan scores (0-100 percentage)
+  planRedScore    Float    @default(0)
+  planYellowScore Float    @default(0)
+  planGreenScore  Float    @default(0)
+  // Actual scores (0-100 percentage)
+  actualRedScore  Float    @default(0)
+  actualYellowScore Float  @default(0)
+  actualGreenScore Float   @default(0)
+  // Next Week Plan scores (0-100 percentage)
+  nextRedScore    Float    @default(0)
+  nextYellowScore Float    @default(0)
+  nextGreenScore  Float    @default(0)
+  // Performance Rating
+  prScore         Float    @default(0)
+  // Commitments for next week
+  commitments     String?
+  // Notes/remarks
+  notes           String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  user            User     @relation("MondayMeetingUser", fields: [userId], references: [id])
+
+  @@unique([userId, weekNumber, year])
+}
+
+// ═══════════════════════════════════════════════════════════
+// TaskActivity — persistent audit log of every task event
+// (creation, update, deletion, completion, revision, etc.)
+// This NEVER gets cleaned up automatically — gives the user
+// a complete history they can review in the Recent Activity feed.
+// ═══════════════════════════════════════════════════════════
+model TaskActivity {
+  id          String   @id @default(cuid())
+  // Action type: CREATED | UPDATED | DELETED | COMPLETED | REVISED | CANCELLED | STATUS_CHANGED
+  action      String
+  // Snapshot of the task title at the time of the event (so we still have
+  // something to show even after the task is deleted).
+  taskTitle   String
+  // Original task ID — kept as a plain string (not a FK) so that when a
+  // task is deleted, the activity log entry survives.
+  taskId      String
+  // Optional: snapshot of task metadata for richer audit
+  priority    String?
+  department  String?
+  category    String?
+  status      String?
+  // Who performed the action
+  actorId     String?
+  // Short human-readable reason / description
+  description String?
+  createdAt   DateTime @default(now())
+
+  actor       User?    @relation("TaskActivityActor", fields: [actorId], references: [id])
+
+  @@index([taskId])
+  @@index([createdAt])
+  @@index([action])
+}
+
+// ═══════════════════════════════════════════════════════════
+// v24·0625 — ATTENDANCE QUERY (HRMS ↔ ERP BRIDGE)
+// ═══════════════════════════════════════════════════════════
+// PURELY ADDITIVE model — does NOT touch any existing table or row.
+// Employees raise queries about their HRMS attendance (e.g. "my check-in
+// is missing for 12 June"). The query is stored in ERP. HR (from HRMS)
+// reads open queries via the external API and posts a reply. The reply
+// is also stored here. NO attendance data is ever modified — this is a
+// read-only bridge with a side-channel for query/response.
+model AttendanceQuery {
+  id           String   @id @default(cuid())
+  // ERP user who raised the query
+  userId       String
+  user         User     @relation("AttendanceQueryUser", fields: [userId], references: [id])
+  // HRMS employeeId (looked up from email at raise time, stored for reference)
+  hrmsEmployeeId String?
+  // Month/Year the query is about (e.g. 6 / 2026). Free-form — kept as integers.
+  queryMonth   Int
+  queryYear    Int
+  // The employee's question / complaint
+  queryText    String
+  // Status: OPEN | RESPONDED | CLOSED
+  status       String   @default("OPEN")
+  // HR reply (set when HR responds from HRMS)
+  hrReply      String?
+  // Who in HRMS responded (stored as free-text — HRMS admin username)
+  repliedBy    String?
+  repliedAt    DateTime?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@index([userId])
+  @@index([status])
+  @@index([createdAt])
+}

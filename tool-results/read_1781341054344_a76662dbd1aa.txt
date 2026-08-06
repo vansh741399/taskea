@@ -1,0 +1,917 @@
+     1→'use client'
+     2→
+     3→import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+     4→import { useWorkflowStore } from '@/stores/workflow-store'
+     5→import { useState, useRef, useEffect } from 'react'
+     6→
+     7→interface LaxreeTasksProps {
+     8→  showCancelled?: boolean
+     9→  showExtHold?: boolean
+    10→  showEscalations?: boolean
+    11→}
+    12→
+    13→export function LaxreeTasks({ showCancelled, showExtHold, showEscalations }: LaxreeTasksProps) {
+    14→  const { currentUser, taskTab, setTaskTab, setSelectedTaskId, selectedTaskId, addToast, setCreateTaskOpen, currentRole } = useWorkflowStore()
+    15→  const queryClient = useQueryClient()
+    16→  const [menuOpenId, setMenuOpenId] = useState<string | null>(null)
+    17→  const [editTask, setEditTask] = useState<any>(null)
+    18→  const [confirmAction, setConfirmAction] = useState<{ id: string; action: string } | null>(null)
+    19→  const [searchQuery, setSearchQuery] = useState('')
+    20→  const menuRef = useRef<HTMLDivElement>(null)
+    21→
+    22→  // Revise modal state
+    23→  const [reviseTask, setReviseTask] = useState<any>(null)
+    24→  const [reviseReason, setReviseReason] = useState('')
+    25→  const [reviseNextDate, setReviseNextDate] = useState('')
+    26→
+    27→  const { data: tasks = [] } = useQuery({
+    28→    queryKey: ['tasks-list'],
+    29→    queryFn: () => fetch('/api/tasks').then(r => r.json()),
+    30→  })
+    31→
+    32→  const { data: users = [] } = useQuery({
+    33→    queryKey: ['users-tasks'],
+    34→    queryFn: () => fetch('/api/users').then(r => r.json()),
+    35→  })
+    36→
+    37→  useEffect(() => {
+    38→    const handler = (e: MouseEvent) => {
+    39→      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
+    40→        setMenuOpenId(null)
+    41→      }
+    42→    }
+    43→    document.addEventListener('mousedown', handler)
+    44→    return () => document.removeEventListener('mousedown', handler)
+    45→  }, [])
+    46→
+    47→  const deleteMutation = useMutation({
+    48→    mutationFn: (id: string) => fetch(`/api/tasks/${id}`, { method: 'DELETE' }).then(r => r.json()),
+    49→    onSuccess: () => {
+    50→      queryClient.invalidateQueries({ queryKey: ['tasks-list'] })
+    51→      queryClient.invalidateQueries({ queryKey: ['dashboard'] })
+    52→      addToast('ok', 'Task deleted')
+    53→      setConfirmAction(null)
+    54→      setMenuOpenId(null)
+    55→    },
+    56→  })
+    57→
+    58→  const cancelMutation = useMutation({
+    59→    mutationFn: ({ id }: { id: string }) =>
+    60→      fetch(`/api/tasks/${id}`, {
+    61→        method: 'PATCH',
+    62→        headers: { 'Content-Type': 'application/json' },
+    63→        body: JSON.stringify({ status: 'CANCELLED' }),
+    64→      }).then(r => r.json()),
+    65→    onSuccess: () => {
+    66→      queryClient.invalidateQueries({ queryKey: ['tasks-list'] })
+    67→      queryClient.invalidateQueries({ queryKey: ['dashboard'] })
+    68→      addToast('ok', 'Task cancelled')
+    69→      setConfirmAction(null)
+    70→      setMenuOpenId(null)
+    71→    },
+    72→  })
+    73→
+    74→  const completeMutation = useMutation({
+    75→    mutationFn: ({ id }: { id: string }) =>
+    76→      fetch(`/api/tasks/${id}`, {
+    77→        method: 'PATCH',
+    78→        headers: { 'Content-Type': 'application/json' },
+    79→        body: JSON.stringify({ status: 'COMPLETED' }),
+    80→      }).then(r => r.json()),
+    81→    onSuccess: () => {
+    82→      queryClient.invalidateQueries({ queryKey: ['tasks-list'] })
+    83→      queryClient.invalidateQueries({ queryKey: ['dashboard'] })
+    84→      addToast('ok', 'Task completed! ✓')
+    85→      setMenuOpenId(null)
+    86→      setSelectedTaskId(null)
+    87→    },
+    88→  })
+    89→
+    90→  // Revise mutation - reopens a completed task back to IN_PROGRESS with reason + next date
+    91→  const reviseMutation = useMutation({
+    92→    mutationFn: ({ id, reason, nextDate }: { id: string; reason: string; nextDate: string }) =>
+    93→      fetch(`/api/tasks/${id}`, {
+    94→        method: 'PATCH',
+    95→        headers: { 'Content-Type': 'application/json' },
+    96→        body: JSON.stringify({
+    97→          status: 'IN_PROGRESS',
+    98→          reviseReason: reason || null,
+    99→          reviseNextDate: nextDate || null,
+   100→        }),
+   101→      }).then(r => r.json()),
+   102→    onSuccess: () => {
+   103→      queryClient.invalidateQueries({ queryKey: ['tasks-list'] })
+   104→      queryClient.invalidateQueries({ queryKey: ['dashboard'] })
+   105→      addToast('ok', 'Task reopened for revision')
+   106→      setReviseTask(null)
+   107→      setReviseReason('')
+   108→      setReviseNextDate('')
+   109→      setMenuOpenId(null)
+   110→    },
+   111→  })
+   112→
+   113→  const editMutation = useMutation({
+   114→    mutationFn: ({ id, data }: { id: string; data: any }) =>
+   115→      fetch(`/api/tasks/${id}`, {
+   116→        method: 'PATCH',
+   117→        headers: { 'Content-Type': 'application/json' },
+   118→        body: JSON.stringify(data),
+   119→      }).then(r => r.json()),
+   120→    onSuccess: () => {
+   121→      queryClient.invalidateQueries({ queryKey: ['tasks-list'] })
+   122→      queryClient.invalidateQueries({ queryKey: ['dashboard'] })
+   123→      addToast('ok', 'Task updated')
+   124→      setEditTask(null)
+   125→    },
+   126→  })
+   127→
+   128→  // Step completion mutation - simplified, no director approval routing
+   129→  const stepDoneMutation = useMutation({
+   130→    mutationFn: ({ taskId, stepId }: { taskId: string; stepId: string }) =>
+   131→      fetch(`/api/tasks/${taskId}/steps`, {
+   132→        method: 'PATCH',
+   133→        headers: { 'Content-Type': 'application/json' },
+   134→        body: JSON.stringify({ stepId, action: 'complete' }),
+   135→      }).then(r => r.json()),
+   136→    onSuccess: (data: any) => {
+   137→      queryClient.invalidateQueries({ queryKey: ['tasks-list'] })
+   138→      queryClient.invalidateQueries({ queryKey: ['dashboard'] })
+   139→      if (data.allDone) {
+   140→        addToast('ok', 'All steps done! Task completed ✓')
+   141→      } else {
+   142→        addToast('ok', 'Step completed! ✓')
+   143→      }
+   144→    },
+   145→  })
+   146→
+   147→  // Filtering
+   148→  let filtered = Array.isArray(tasks) ? [...tasks] : []
+   149→
+   150→  // Search filter
+   151→  if (searchQuery.trim()) {
+   152→    const q = searchQuery.toLowerCase()
+   153→    filtered = filtered.filter((t: any) =>
+   154→      t.title?.toLowerCase().includes(q) ||
+   155→      t.department?.toLowerCase().includes(q) ||
+   156→      t.category?.toLowerCase().includes(q) ||
+   157→      t.owner?.name?.toLowerCase().includes(q)
+   158→    )
+   159→  }
+   160→
+   161→  if (showCancelled) filtered = filtered.filter((t: any) => t.status === 'CANCELLED')
+   162→  if (showExtHold) filtered = filtered.filter((t: any) => t.status === 'EXTERNAL_HOLD')
+   163→  if (showEscalations) filtered = filtered.filter((t: any) =>
+   164→    t.status === 'ESCALATED' || (t.dueDate && new Date(t.dueDate) < new Date() && t.status !== 'COMPLETED' && t.status !== 'CANCELLED')
+   165→  )
+   166→
+   167→  if (!showCancelled && !showExtHold && !showEscalations) {
+   168→    if (taskTab === 'inprogress') filtered = filtered.filter((t: any) => t.status === 'IN_PROGRESS' || t.status === 'IN_REVIEW' || t.status === 'ON_HOLD')
+   169→    else if (taskTab === 'pending') filtered = filtered.filter((t: any) => t.status === 'PENDING' || t.status === 'DRAFT')
+   170→    else if (taskTab === 'completed') filtered = filtered.filter((t: any) => t.status === 'COMPLETED')
+   171→    else if (taskTab === 'overdue') filtered = filtered.filter((t: any) =>
+   172→      t.dueDate && new Date(t.dueDate) < new Date() && t.status !== 'COMPLETED' && t.status !== 'CANCELLED'
+   173→    )
+   174→  }
+   175→
+   176→  const tabs = [
+   177→    { id: 'all', label: 'All', count: Array.isArray(tasks) ? tasks.length : 0 },
+   178→    { id: 'inprogress', label: 'Active', count: (Array.isArray(tasks) ? tasks : []).filter((t: any) => t.status === 'IN_PROGRESS' || t.status === 'IN_REVIEW' || t.status === 'ON_HOLD').length },
+   179→    { id: 'pending', label: 'Pending', count: (Array.isArray(tasks) ? tasks : []).filter((t: any) => t.status === 'PENDING' || t.status === 'DRAFT').length },
+   180→    { id: 'completed', label: 'Completed', count: (Array.isArray(tasks) ? tasks : []).filter((t: any) => t.status === 'COMPLETED').length },
+   181→    { id: 'overdue', label: 'Overdue', count: (Array.isArray(tasks) ? tasks : []).filter((t: any) => t.dueDate && new Date(t.dueDate) < new Date() && t.status !== 'COMPLETED' && t.status !== 'CANCELLED').length },
+   182→  ]
+   183→
+   184→  const getInitials = (name: string) => name?.split(' ').map(w => w[0]).join('').substring(0, 2).toUpperCase() || '?'
+   185→
+   186→  const priorityBadge: Record<string, { bg: string; color: string }> = {
+   187→    CRITICAL: { bg: '#FFF1F2', color: '#E11D48' },
+   188→    HIGH: { bg: '#FEF2F2', color: '#DC2626' },
+   189→    MEDIUM: { bg: '#FFFBEB', color: '#D97706' },
+   190→    LOW: { bg: '#EFF6FF', color: '#2563EB' },
+   191→  }
+   192→
+   193→  const statusStyle: Record<string, { bg: string; color: string; label: string }> = {
+   194→    PENDING: { bg: '#FEF3C7', color: '#92400E', label: 'Pending' },
+   195→    IN_PROGRESS: { bg: '#DBEAFE', color: '#1D4ED8', label: 'In Progress' },
+   196→    COMPLETED: { bg: '#DCFCE7', color: '#15803D', label: 'Done' },
+   197→    CANCELLED: { bg: '#F3F4F6', color: '#6B7280', label: 'Cancelled' },
+   198→    ON_HOLD: { bg: '#EDE9FE', color: '#6D28D9', label: 'On Hold' },
+   199→    ESCALATED: { bg: '#FEE2E2', color: '#DC2626', label: 'Escalated' },
+   200→    EXTERNAL_HOLD: { bg: '#FFF7ED', color: '#C2410C', label: 'Ext Hold' },
+   201→    DRAFT: { bg: '#F3F4F6', color: '#6B7280', label: 'Draft' },
+   202→    IN_REVIEW: { bg: '#FEF3C7', color: '#92400E', label: 'In Review' },
+   203→    APPROVED: { bg: '#DCFCE7', color: '#15803D', label: 'Approved' },
+   204→    REJECTED: { bg: '#FEE2E2', color: '#DC2626', label: 'Rejected' },
+   205→    RE_OPENED: { bg: '#FEF3C7', color: '#92400E', label: 'Re-Opened' },
+   206→  }
+   207→
+   208→  const getSlaStatus = (task: any) => {
+   209→    if (task.status === 'COMPLETED' || task.status === 'CANCELLED') return null
+   210→    if (!task.dueDate) return { label: 'On Track', bg: '#ECFDF5', color: '#059669' }
+   211→    const now = new Date()
+   212→    const due = new Date(task.dueDate)
+   213→    const diffDays = Math.ceil((due.getTime() - now.getTime()) / (1000 * 60 * 60 * 24))
+   214→    if (diffDays < 0) return { label: 'Overdue', bg: '#FEF2F2', color: '#DC2626' }
+   215→    if (diffDays <= 2) return { label: 'Due Soon', bg: '#FFFBEB', color: '#D97706' }
+   216→    return { label: 'On Track', bg: '#ECFDF5', color: '#059669' }
+   217→  }
+   218→
+   219→  // Determine the next actionable step for a task
+   220→  const getNextActionableStep = (task: any) => {
+   221→    if (!task.taskSteps || task.taskSteps.length === 0) return null
+   222→    if (task.status === 'IN_PROGRESS' || task.status === 'REJECTED' || task.status === 'RE_OPENED') {
+   223→      const nextStep = task.taskSteps.find((s: any) => s.status !== 'COMPLETED')
+   224→      return nextStep || null
+   225→    }
+   226→    return null
+   227→  }
+   228→
+   229→  const pageTitle = showCancelled ? 'Cancelled Tasks' : showExtHold ? 'External Hold' : showEscalations ? 'Escalations' : 'All Tasks'
+   230→  const pageDesc = showCancelled ? 'Cancelled workflow items' : showExtHold ? 'Tasks waiting on external action' : showEscalations ? 'Overdue and escalated items' : 'Manage and track all tasks'
+   231→
+   232→  return (
+   233→    <>
+   234→      <div className="ph">
+   235→        <div className="ph-left">
+   236→          <h2>{pageTitle}</h2>
+   237→          <p>{pageDesc}</p>
+   238→        </div>
+   239→        <div className="ph-right">
+   240→          {!showCancelled && !showExtHold && !showEscalations && (
+   241→            <button className="btn btn-gold" onClick={() => setCreateTaskOpen(true)}>+ Create Task</button>
+   242→          )}
+   243→        </div>
+   244→      </div>
+   245→
+   246→      <div className="page-accent" />
+   247→
+   248→      {/* Search Bar */}
+   249→      {!showCancelled && !showExtHold && !showEscalations && (
+   250→        <div style={{ marginBottom: 14 }}>
+   251→          <div className="search" style={{ maxWidth: 400 }}>
+   252→            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ color: 'var(--t4)', flexShrink: 0 }}>
+   253→              <circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" />
+   254→            </svg>
+   255→            <input
+   256→              type="text"
+   257→              placeholder="Search tasks by name, department, person..."
+   258→              value={searchQuery}
+   259→              onChange={e => setSearchQuery(e.target.value)}
+   260→              style={{ border: 'none', outline: 'none', background: 'transparent', fontFamily: "'DM Sans', sans-serif", fontSize: 12.5, color: 'var(--t1)', width: '100%' }}
+   261→            />
+   262→          </div>
+   263→        </div>
+   264→      )}
+   265→
+   266→      {/* Tabs */}
+   267→      {!showCancelled && !showExtHold && !showEscalations && (
+   268→        <div className="tabs" style={{ marginBottom: 14 }}>
+   269→          {tabs.map(tab => (
+   270→            <div key={tab.id} className={`tab${taskTab === tab.id ? ' active' : ''}`}
+   271→              onClick={() => setTaskTab(tab.id)}>
+   272→              {tab.label}
+   273→              {tab.count > 0 && <span className="tab-cnt">{tab.count}</span>}
+   274→            </div>
+   275→          ))}
+   276→        </div>
+   277→      )}
+   278→
+   279→      {/* Task Cards */}
+   280→      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+   281→        {filtered.length === 0 ? (
+   282→          <div className="lcard">
+   283→            <div className="cb" style={{ textAlign: 'center', padding: 40, color: 'var(--t3)' }}>
+   284→              <div style={{ fontSize: 32, marginBottom: 8 }}>📋</div>
+   285→              <div style={{ fontWeight: 700, fontSize: 14 }}>No tasks found</div>
+   286→              <div style={{ fontSize: 12, marginTop: 4 }}>Create a new task or adjust your filters</div>
+   287→            </div>
+   288→          </div>
+   289→        ) : filtered.map((task: any) => {
+   290→          const sla = getSlaStatus(task)
+   291→          const pBadge = priorityBadge[task.priority] || priorityBadge.MEDIUM
+   292→          const sStyle = statusStyle[task.status] || statusStyle.PENDING
+   293→          const stepsTotal = task.taskSteps?.length || 0
+   294→          const stepsDone = task.taskSteps?.filter((s: any) => s.status === 'COMPLETED').length || 0
+   295→          const owner = task.owner
+   296→          const nextStep = getNextActionableStep(task)
+   297→
+   298→          return (
+   299→            <div key={task.id} className="lcard" style={{ cursor: 'pointer', transition: 'all .15s' }}
+   300→              onClick={() => setSelectedTaskId(task.id)}>
+   301→              <div style={{ padding: '14px 16px' }}>
+   302→                <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12 }}>
+   303→                  {/* Avatar */}
+   304→                  <div className="av" style={{ width: 38, height: 38, fontSize: 13, background: sStyle.color, flexShrink: 0 }}>
+   305→                    {getInitials(owner?.name || 'T')}
+   306→                  </div>
+   307→
+   308→                  {/* Content */}
+   309→                  <div style={{ flex: 1, minWidth: 0 }}>
+   310→                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4, flexWrap: 'wrap' }}>
+   311→                      <span style={{ fontWeight: 700, fontSize: 13.5, color: 'var(--t1)' }}>{task.title}</span>
+   312→                      <span className="badge" style={{ fontSize: 9, padding: '2px 8px', background: pBadge.bg, color: pBadge.color, fontWeight: 700 }}>
+   313→                        {task.priority || 'MEDIUM'}
+   314→                      </span>
+   315→                      <span className="badge" style={{ fontSize: 9, padding: '2px 8px', background: sStyle.bg, color: sStyle.color, fontWeight: 700 }}>
+   316→                        {sStyle.label}
+   317→                      </span>
+   318→                      {sla && (
+   319→                        <span className="badge" style={{ fontSize: 9, padding: '2px 8px', background: sla.bg, color: sla.color, fontWeight: 700 }}>
+   320→                          {sla.label}
+   321→                        </span>
+   322→                      )}
+   323→                    </div>
+   324→
+   325→                    <div style={{ display: 'flex', alignItems: 'center', gap: 12, fontSize: 11, color: 'var(--t3)', flexWrap: 'wrap' }}>
+   326→                      <span style={{ fontWeight: 600 }}>{owner?.name || 'Unassigned'}</span>
+   327→                      {task.department && <span className="badge b-gray" style={{ fontSize: 9, padding: '1px 6px' }}>{task.department}</span>}
+   328→                      {task.category && <span className="badge" style={{ fontSize: 9, padding: '1px 6px', background: 'var(--amber-l)', color: 'var(--amber)' }}>{task.category}</span>}
+   329→                      {task.dueDate && <span>Due: {new Date(task.dueDate).toLocaleDateString('en-IN', { day: '2-digit', month: 'short' })}</span>}
+   330→                    </div>
+   331→
+   332→                    {/* Step Progress */}
+   333→                    {stepsTotal > 0 && (
+   334→                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 8 }}>
+   335→                        <div className="prog" style={{ flex: 1, minWidth: 60 }}>
+   336→                          <div className="prog-bg" style={{ height: 6 }}>
+   337→                            <div className="prog-fill" style={{
+   338→                              width: `${stepsTotal > 0 ? (stepsDone / stepsTotal * 100) : 0}%`,
+   339→                              background: stepsDone === stepsTotal ? 'var(--green)' : 'var(--g2)',
+   340→                              height: '100%',
+   341→                            }} />
+   342→                          </div>
+   343→                        </div>
+   344→                        <span style={{ fontSize: 10, fontWeight: 700, color: stepsDone === stepsTotal ? 'var(--green)' : 'var(--t2)' }}>
+   345→                          {stepsDone}/{stepsTotal} steps
+   346→                        </span>
+   347→                      </div>
+   348→                    )}
+   349→                  </div>
+   350→
+   351→                  {/* ═══ SIMPLIFIED ACTION BUTTONS ═══ */}
+   352→                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }} onClick={e => e.stopPropagation()}>
+   353→                    {/* PENDING → If has uncompleted steps show Steps button, else Done + Revise */}
+   354→                    {task.status === 'PENDING' && (
+   355→                      <>
+   356→                        {stepsTotal > 0 && stepsDone < stepsTotal ? (
+   357→                          <button
+   358→                            className="btn btn-xs"
+   359→                            style={{ background: 'var(--blue-l)', color: 'var(--blue)', border: '1.5px solid var(--blue)', fontWeight: 800, padding: '4px 12px' }}
+   360→                            onClick={() => setSelectedTaskId(task.id)}
+   361→                            title="Complete steps first"
+   362→                          >
+   363→                            ☰ Steps {stepsDone}/{stepsTotal}
+   364→                          </button>
+   365→                        ) : (
+   366→                          <button
+   367→                            className="btn btn-xs"
+   368→                            style={{ background: 'var(--green-l)', color: 'var(--green)', border: '1.5px solid var(--green)', fontWeight: 800, padding: '4px 12px' }}
+   369→                            onClick={() => completeMutation.mutate({ id: task.id })}
+   370→                            disabled={completeMutation.isPending}
+   371→                            title="Mark as Done"
+   372→                          >
+   373→                            ✓ Done
+   374→                          </button>
+   375→                        )}
+   376→                        <button
+   377→                          className="btn btn-xs"
+   378→                          style={{ background: 'var(--amber-l)', color: 'var(--amber)', border: '1px solid var(--amber)', fontWeight: 700 }}
+   379→                          onClick={() => { setReviseTask(task); setReviseReason(''); setReviseNextDate('') }}
+   380→                          title="Revise Task"
+   381→                        >
+   382→                          ✏ Revise
+   383→                        </button>
+   384→                      </>
+   385→                    )}
+   386→
+   387→                    {/* IN_PROGRESS → If has uncompleted steps show Steps button, else Done + Revise */}
+   388→                    {task.status === 'IN_PROGRESS' && (
+   389→                      <>
+   390→                        {stepsTotal > 0 && stepsDone < stepsTotal ? (
+   391→                          <button
+   392→                            className="btn btn-xs"
+   393→                            style={{ background: 'var(--blue-l)', color: 'var(--blue)', border: '1.5px solid var(--blue)', fontWeight: 800, padding: '4px 12px' }}
+   394→                            onClick={() => setSelectedTaskId(task.id)}
+   395→                            title="Complete steps first"
+   396→                          >
+   397→                            ☰ Steps {stepsDone}/{stepsTotal}
+   398→                          </button>
+   399→                        ) : (
+   400→                          <button
+   401→                            className="btn btn-xs"
+   402→                            style={{ background: 'var(--green-l)', color: 'var(--green)', border: '1.5px solid var(--green)', fontWeight: 800, padding: '4px 12px' }}
+   403→                            onClick={() => completeMutation.mutate({ id: task.id })}
+   404→                            disabled={completeMutation.isPending}
+   405→                            title="Mark as Done"
+   406→                          >
+   407→                            ✓ Done
+   408→                          </button>
+   409→                        )}
+   410→                        <button
+   411→                          className="btn btn-xs"
+   412→                          style={{ background: 'var(--amber-l)', color: 'var(--amber)', border: '1px solid var(--amber)', fontWeight: 700 }}
+   413→                          onClick={() => { setReviseTask(task); setReviseReason(''); setReviseNextDate('') }}
+   414→                          title="Revise Task"
+   415→                        >
+   416→                          ✏ Revise
+   417→                        </button>
+   418→                      </>
+   419→                    )}
+   420→
+   421→                    {/* COMPLETED → Show "Completed task ✅" only — NO Revise button */}
+   422→                    {task.status === 'COMPLETED' && (
+   423→                      <span style={{
+   424→                        fontSize: 11, fontWeight: 800, color: 'var(--green)',
+   425→                        background: 'var(--green-l)', padding: '3px 10px',
+   426→                        borderRadius: 6, border: '1px solid var(--green)',
+   427→                        display: 'flex', alignItems: 'center', gap: 4,
+   428→                      }}>
+   429→                        Completed task ✅
+   430→                        {task.score != null && (
+   431→                          <span style={{ fontSize: 10, fontWeight: 700, color: task.score >= 70 ? 'var(--green)' : task.score >= 40 ? 'var(--amber)' : 'var(--red)' }}>
+   432→                            · {task.score}
+   433→                          </span>
+   434→                        )}
+   435→                      </span>
+   436→                    )}
+   437→
+   438→                    {/* Other statuses (IN_REVIEW, ON_HOLD etc from old workflow) → if has steps show Steps, else Done + Revise */}
+   439→                    {(task.status === 'IN_REVIEW' || task.status === 'ON_HOLD' || task.status === 'ESCALATED') && (
+   440→                      <>
+   441→                        {stepsTotal > 0 && stepsDone < stepsTotal ? (
+   442→                          <button
+   443→                            className="btn btn-xs"
+   444→                            style={{ background: 'var(--blue-l)', color: 'var(--blue)', border: '1.5px solid var(--blue)', fontWeight: 800, padding: '4px 12px' }}
+   445→                            onClick={() => setSelectedTaskId(task.id)}
+   446→                            title="Complete steps first"
+   447→                          >
+   448→                            ☰ Steps {stepsDone}/{stepsTotal}
+   449→                          </button>
+   450→                        ) : (
+   451→                          <button
+   452→                            className="btn btn-xs"
+   453→                            style={{ background: 'var(--green-l)', color: 'var(--green)', border: '1.5px solid var(--green)', fontWeight: 800, padding: '4px 12px' }}
+   454→                            onClick={() => completeMutation.mutate({ id: task.id })}
+   455→                            disabled={completeMutation.isPending}
+   456→                            title="Mark as Done"
+   457→                          >
+   458→                            ✓ Done
+   459→                          </button>
+   460→                        )}
+   461→                        <button
+   462→                          className="btn btn-xs"
+   463→                          style={{ background: 'var(--amber-l)', color: 'var(--amber)', border: '1px solid var(--amber)', fontWeight: 700 }}
+   464→                          onClick={() => { setReviseTask(task); setReviseReason(''); setReviseNextDate('') }}
+   465→                          title="Revise / Reopen Task"
+   466→                        >
+   467→                          ✏ Revise
+   468→                        </button>
+   469→                      </>
+   470→                    )}
+   471→
+   472→                    {/* 3-dot menu */}
+   473→                    <div style={{ position: 'relative' }} ref={menuOpenId === task.id ? menuRef : null}>
+   474→                      <button
+   475→                        className="btn btn-xs"
+   476→                        style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '4px 6px', fontSize: 16, color: 'var(--t3)' }}
+   477→                        onClick={(e) => { e.stopPropagation(); setMenuOpenId(menuOpenId === task.id ? null : task.id) }}
+   478→                      >
+   479→                        ⋮
+   480→                      </button>
+   481→                      {menuOpenId === task.id && (
+   482→                        <div style={{
+   483→                          position: 'absolute', right: 0, top: '100%', zIndex: 500,
+   484→                          background: 'var(--card)', border: '1px solid var(--b2)',
+   485→                          borderRadius: 8, boxShadow: 'var(--s3)', minWidth: 150, overflow: 'hidden',
+   486→                        }}>
+   487→                          <div
+   488→                            style={{ padding: '8px 12px', fontSize: 12, cursor: 'pointer', fontWeight: 600, borderBottom: '1px solid var(--b1)' }}
+   489→                            onClick={() => { setSelectedTaskId(task.id); setMenuOpenId(null) }}
+   490→                            onMouseEnter={e => e.currentTarget.style.background = 'var(--bg2)'}
+   491→                            onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+   492→                          >
+   493→                            👁 View Details
+   494→                          </div>
+   495→                          <div
+   496→                            style={{ padding: '8px 12px', fontSize: 12, cursor: 'pointer', fontWeight: 600, borderBottom: '1px solid var(--b1)' }}
+   497→                            onClick={() => { setEditTask(task); setMenuOpenId(null) }}
+   498→                            onMouseEnter={e => e.currentTarget.style.background = 'var(--bg2)'}
+   499→                            onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+   500→                          >
+   501→                            ✏️ Edit
+   502→                          </div>
+   503→                          <div
+   504→                            style={{ padding: '8px 12px', fontSize: 12, cursor: 'pointer', fontWeight: 600, color: 'var(--red)', borderBottom: '1px solid var(--b1)' }}
+   505→                            onClick={() => { setConfirmAction({ id: task.id, action: 'delete' }); setMenuOpenId(null) }}
+   506→                            onMouseEnter={e => e.currentTarget.style.background = 'var(--bg2)'}
+   507→                            onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+   508→                          >
+   509→                            🗑 Delete
+   510→                          </div>
+   511→                          {task.status !== 'CANCELLED' && task.status !== 'COMPLETED' && (
+   512→                            <div
+   513→                              style={{ padding: '8px 12px', fontSize: 12, cursor: 'pointer', fontWeight: 600, color: 'var(--amber)' }}
+   514→                              onClick={() => { setConfirmAction({ id: task.id, action: 'cancel' }); setMenuOpenId(null) }}
+   515→                              onMouseEnter={e => e.currentTarget.style.background = 'var(--bg2)'}
+   516→                              onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+   517→                            >
+   518→                              🚫 Cancel Task
+   519→                            </div>
+   520→                          )}
+   521→                        </div>
+   522→                      )}
+   523→                    </div>
+   524→                  </div>
+   525→                </div>
+   526→              </div>
+   527→            </div>
+   528→          )
+   529→        })}
+   530→      </div>
+   531→
+   532→      {/* Task Detail Modal */}
+   533→      {selectedTaskId && (() => {
+   534→        const task = tasks.find((t: any) => t.id === selectedTaskId)
+   535→        if (!task) return null
+   536→        const owner = task.owner
+   537→        const stepsTotal = task.taskSteps?.length || 0
+   538→        const stepsDone = task.taskSteps?.filter((s: any) => s.status === 'COMPLETED').length || 0
+   539→        const sla = getSlaStatus(task)
+   540→        const pBadge = priorityBadge[task.priority] || priorityBadge.MEDIUM
+   541→        const sStyle = statusStyle[task.status] || statusStyle.PENDING
+   542→
+   543→        return (
+   544→          <div className="overlay show" onClick={e => { if (e.target === e.currentTarget) setSelectedTaskId(null) }}>
+   545→            <div className="modal modal-lg" style={{ maxHeight: '90vh', overflowY: 'auto' }}>
+   546→              <button className="mx" onClick={() => setSelectedTaskId(null)}>✕</button>
+   547→
+   548→              {/* Header */}
+   549→              <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12, marginBottom: 16 }}>
+   550→                <div className="av" style={{ width: 44, height: 44, fontSize: 15, background: sStyle.color }}>
+   551→                  {getInitials(owner?.name || 'T')}
+   552→                </div>
+   553→                <div style={{ flex: 1 }}>
+   554→                  <div className="mt" style={{ marginBottom: 4 }}>{task.title}</div>
+   555→                  <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
+   556→                    <span className="badge" style={{ background: sStyle.bg, color: sStyle.color, fontWeight: 700 }}>{sStyle.label}</span>
+   557→                    <span className="badge" style={{ background: pBadge.bg, color: pBadge.color, fontWeight: 700 }}>{task.priority}</span>
+   558→                    {task.department && <span className="badge b-gray">{task.department}</span>}
+   559→                    {task.category && <span className="badge" style={{ background: 'var(--amber-l)', color: 'var(--amber)' }}>{task.category}</span>}
+   560→                    {sla && <span className="badge" style={{ background: sla.bg, color: sla.color }}>{sla.label}</span>}
+   561→                  </div>
+   562→                </div>
+   563→              </div>
+   564→
+   565→              {/* Description */}
+   566→              {task.description && (
+   567→                <div style={{ marginBottom: 14, padding: 12, background: 'var(--bg)', borderRadius: 8, fontSize: 13, color: 'var(--t2)', lineHeight: 1.6 }}>
+   568→                  {task.description}
+   569→                </div>
+   570→              )}
+   571→
+   572→              {/* Details Grid */}
+   573→              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 14, fontSize: 12 }}>
+   574→                <div style={{ padding: '8px 12px', background: 'var(--bg2)', borderRadius: 6 }}>
+   575→                  <span style={{ color: 'var(--t3)', fontWeight: 700 }}>Assignee:</span> {owner?.name || 'Unassigned'}
+   576→                </div>
+   577→                <div style={{ padding: '8px 12px', background: 'var(--bg2)', borderRadius: 6 }}>
+   578→                  <span style={{ color: 'var(--t3)', fontWeight: 700 }}>Due:</span> {task.dueDate ? new Date(task.dueDate).toLocaleDateString('en-IN', { month: 'short', day: 'numeric', year: 'numeric' }) : 'No due date'}
+   579→                </div>
+   580→                {task.createdAt && (
+   581→                  <div style={{ padding: '8px 12px', background: 'var(--bg2)', borderRadius: 6 }}>
+   582→                    <span style={{ color: 'var(--t3)', fontWeight: 700 }}>Created:</span> {new Date(task.createdAt).toLocaleDateString('en-IN', { month: 'short', day: 'numeric' })}
+   583→                  </div>
+   584→                )}
+   585→                {task.completedAt && (
+   586→                  <div style={{ padding: '8px 12px', background: 'var(--green-l)', borderRadius: 6, color: 'var(--green)', fontWeight: 600 }}>
+   587→                    ✓ Completed: {new Date(task.completedAt).toLocaleDateString('en-IN', { month: 'short', day: 'numeric' })}
+   588→                  </div>
+   589→                )}
+   590→                {task.reviseReason && (
+   591→                  <div style={{ padding: '8px 12px', background: 'var(--amber-l)', borderRadius: 6, color: 'var(--amber)', fontWeight: 600, gridColumn: '1 / -1' }}>
+   592→                    ↩ Revised: {task.reviseReason}
+   593→                    {task.reviseNextDate && <span style={{ marginLeft: 8 }}>· Next date: {new Date(task.reviseNextDate).toLocaleDateString('en-IN', { month: 'short', day: 'numeric' })}</span>}
+   594→                  </div>
+   595→                )}
+   596→              </div>
+   597→
+   598→              <div className="gold-divider" />
+   599→
+   600→              {/* Step Progress - simplified, no director approval */}
+   601→              {stepsTotal > 0 && (
+   602→                <div style={{ marginBottom: 14 }}>
+   603→                  <div style={{ fontSize: 11, fontWeight: 900, textTransform: 'uppercase', letterSpacing: 1, color: 'var(--t3)', marginBottom: 8 }}>
+   604→                    Task Steps ({stepsDone}/{stepsTotal})
+   605→                  </div>
+   606→                  {task.taskSteps.map((step: any, i: number) => {
+   607→                    const isCompleted = step.status === 'COMPLETED'
+   608→                    const isCurrentStep = !isCompleted && (i === 0 || task.taskSteps[i - 1]?.status === 'COMPLETED')
+   609→
+   610→                    return (
+   611→                      <div key={step.id} style={{
+   612→                        display: 'flex', alignItems: 'center', gap: 8, padding: '10px 12px',
+   613→                        background: isCompleted ? 'var(--green-l)' : isCurrentStep ? 'var(--blue-l)' : 'var(--bg2)',
+   614→                        borderRadius: 8, marginBottom: 6,
+   615→                        borderLeft: `3px solid ${isCompleted ? 'var(--green)' : isCurrentStep ? 'var(--blue)' : 'var(--b2)'}`,
+   616→                        opacity: !isCompleted && !isCurrentStep ? 0.5 : 1,
+   617→                      }}>
+   618→                        <div style={{
+   619→                          width: 24, height: 24, borderRadius: '50%', fontSize: 10, fontWeight: 800,
+   620→                          display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
+   621→                          background: isCompleted ? 'var(--green)' : isCurrentStep ? 'var(--blue)' : 'var(--g2)',
+   622→                          color: '#fff',
+   623→                        }}>
+   624→                          {isCompleted ? '✓' : i + 1}
+   625→                        </div>
+   626→                        <div style={{ flex: 1, minWidth: 0 }}>
+   627→                          <span style={{ fontSize: 12.5, fontWeight: isCompleted ? 600 : 700, color: isCompleted ? 'var(--green)' : 'var(--t1)' }}>
+   628→                            {step.title}
+   629→                          </span>
+   630→                        </div>
+   631→                        {/* Step action button - show for any non-completed task status */}
+   632→                        {!isCompleted && isCurrentStep && task.status !== 'COMPLETED' && task.status !== 'CANCELLED' && (
+   633→                          <button
+   634→                            className="btn btn-xs"
+   635→                            style={{
+   636→                              background: 'var(--green-l)',
+   637→                              color: 'var(--green)',
+   638→                              border: '1px solid var(--green)',
+   639→                              fontWeight: 700, whiteSpace: 'nowrap',
+   640→                            }}
+   641→                            onClick={() => stepDoneMutation.mutate({ taskId: task.id, stepId: step.id })}
+   642→                            disabled={stepDoneMutation.isPending}
+   643→                          >
+   644→                            ✓ Complete
+   645→                          </button>
+   646→                        )}
+   647→                        <span className="badge" style={{ fontSize: 9, padding: '1px 6px', background: isCompleted ? 'var(--green-l)' : 'var(--amber-l)', color: isCompleted ? 'var(--green)' : 'var(--amber)' }}>
+   648→                          {isCompleted ? 'Done' : 'Pending'}
+   649→                        </span>
+   650→                      </div>
+   651→                    )
+   652→                  })}
+   653→                </div>
+   654→              )}
+   655→
+   656→              {/* ACTION BUTTONS - Simplified */}
+   657→              <div className="gold-divider" />
+   658→              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+   659→                {/* PENDING → If has uncompleted steps show hint, else Done + Revise */}
+   660→                {task.status === 'PENDING' && (
+   661→                  <>
+   662→                    {stepsTotal > 0 && stepsDone < stepsTotal ? (
+   663→                      <div style={{
+   664→                        padding: '8px 16px',
+   665→                        background: 'var(--blue-l)',
+   666→                        borderRadius: 8,
+   667→                        border: '1.5px solid var(--blue)',
+   668→                        fontSize: 13, fontWeight: 700, color: 'var(--blue)',
+   669→                        display: 'flex', alignItems: 'center', gap: 6,
+   670→                      }}>
+   671→                        ☰ Complete all steps first ({stepsDone}/{stepsTotal})
+   672→                      </div>
+   673→                    ) : (
+   674→                      <button className="btn btn-green" onClick={async () => {
+   675→                        await fetch(`/api/tasks/${task.id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status: 'COMPLETED' }) })
+   676→                        queryClient.invalidateQueries({ queryKey: ['tasks-list'] })
+   677→                        queryClient.invalidateQueries({ queryKey: ['dashboard'] })
+   678→                        addToast('ok', 'Task completed! ✓')
+   679→                        setSelectedTaskId(null)
+   680→                      }}>
+   681→                        ✓ Done
+   682→                      </button>
+   683→                    )}
+   684→                    <button className="btn" style={{ background: 'var(--amber-l)', color: 'var(--amber)', border: '1.5px solid var(--amber)' }}
+   685→                      onClick={() => { setReviseTask(task); setReviseReason(''); setReviseNextDate('') }}>
+   686→                      ✏ Revise
+   687→                    </button>
+   688→                  </>
+   689→                )}
+   690→                {/* IN_PROGRESS / IN_REVIEW / ON_HOLD → If has uncompleted steps show hint, else Done + Revise */}
+   691→                {(task.status === 'IN_PROGRESS' || task.status === 'IN_REVIEW' || task.status === 'ON_HOLD') && (
+   692→                  <>
+   693→                    {stepsTotal > 0 && stepsDone < stepsTotal ? (
+   694→                      <div style={{
+   695→                        padding: '8px 16px',
+   696→                        background: 'var(--blue-l)',
+   697→                        borderRadius: 8,
+   698→                        border: '1.5px solid var(--blue)',
+   699→                        fontSize: 13, fontWeight: 700, color: 'var(--blue)',
+   700→                        display: 'flex', alignItems: 'center', gap: 6,
+   701→                      }}>
+   702→                        ☰ Complete all steps first ({stepsDone}/{stepsTotal})
+   703→                      </div>
+   704→                    ) : (
+   705→                      <button className="btn btn-green" onClick={async () => {
+   706→                        await fetch(`/api/tasks/${task.id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status: 'COMPLETED' }) })
+   707→                        queryClient.invalidateQueries({ queryKey: ['tasks-list'] })
+   708→                        queryClient.invalidateQueries({ queryKey: ['dashboard'] })
+   709→                        addToast('ok', 'Task completed! ✓')
+   710→                        setSelectedTaskId(null)
+   711→                      }}>
+   712→                        ✓ Done
+   713→                      </button>
+   714→                    )}
+   715→                    <button className="btn" style={{ background: 'var(--amber-l)', color: 'var(--amber)', border: '1.5px solid var(--amber)' }}
+   716→                      onClick={() => { setReviseTask(task); setReviseReason(''); setReviseNextDate('') }}>
+   717→                      ✏ Revise
+   718→                    </button>
+   719→                  </>
+   720→                )}
+   721→                {/* COMPLETED → Only show Completed task ✅, NO Revise button */}
+   722→                {task.status === 'COMPLETED' && (
+   723→                  <div style={{
+   724→                    padding: '8px 16px',
+   725→                    background: 'var(--green-l)',
+   726→                    borderRadius: 8,
+   727→                    border: '1.5px solid var(--green)',
+   728→                    display: 'flex', alignItems: 'center', gap: 8,
+   729→                    fontSize: 14, fontWeight: 800, color: 'var(--green)',
+   730→                  }}>
+   731→                    Completed task ✅
+   732→                    {task.score != null && (
+   733→                      <span style={{
+   734→                        fontSize: 13, fontWeight: 800,
+   735→                        color: task.score >= 70 ? 'var(--green)' : task.score >= 40 ? 'var(--amber)' : 'var(--red)',
+   736→                        background: task.score >= 70 ? 'var(--green-l)' : task.score >= 40 ? 'var(--amber-l)' : 'var(--red-l)',
+   737→                        padding: '2px 8px', borderRadius: 4,
+   738→                      }}>
+   739→                        Score: {task.score}
+   740→                      </span>
+   741→                    )}
+   742→                  </div>
+   743→                )}
+   744→                {task.status !== 'CANCELLED' && task.status !== 'COMPLETED' && (
+   745→                  <button className="btn btn-red btn-sm" onClick={async () => {
+   746→                    await fetch(`/api/tasks/${task.id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status: 'CANCELLED' }) })
+   747→                    queryClient.invalidateQueries({ queryKey: ['tasks-list'] })
+   748→                    addToast('ok', 'Task cancelled')
+   749→                    setSelectedTaskId(null)
+   750→                  }} style={{ marginLeft: 'auto' }}>
+   751→                    🚫 Cancel Task
+   752→                  </button>
+   753→                )}
+   754→              </div>
+   755→
+   756→              {/* Audit Trail */}
+   757→              <div style={{ marginTop: 14, padding: 12, background: 'var(--bg2)', borderRadius: 8 }}>
+   758→                <div style={{ fontSize: 10, fontWeight: 800, textTransform: 'uppercase', letterSpacing: 0.8, color: 'var(--t3)', marginBottom: 6 }}>Audit Trail</div>
+   759→                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+   760→                  <div style={{ width: 8, height: 8, borderRadius: '50%', background: 'var(--g2)' }} />
+   761→                  <span style={{ fontSize: 12, color: 'var(--t2)' }}>Created — {task.createdAt ? new Date(task.createdAt).toLocaleString() : 'N/A'}</span>
+   762→                </div>
+   763→                {task.updatedAt && task.updatedAt !== task.createdAt && (
+   764→                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+   765→                    <div style={{ width: 8, height: 8, borderRadius: '50%', background: 'var(--amber)' }} />
+   766→                    <span style={{ fontSize: 12, color: 'var(--t2)' }}>Last updated — {new Date(task.updatedAt).toLocaleString()}</span>
+   767→                  </div>
+   768→                )}
+   769→                {task.completedAt && (
+   770→                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 4 }}>
+   771→                    <div style={{ width: 8, height: 8, borderRadius: '50%', background: 'var(--green)' }} />
+   772→                    <span style={{ fontSize: 12, color: 'var(--t2)' }}>Completed — {new Date(task.completedAt).toLocaleString()}</span>
+   773→                  </div>
+   774→                )}
+   775→              </div>
+   776→            </div>
+   777→          </div>
+   778→        )
+   779→      })()}
+   780→
+   781→      {/* Edit Task Modal */}
+   782→      {editTask && (
+   783→        <div className="overlay show" onClick={e => { if (e.target === e.currentTarget) setEditTask(null) }}>
+   784→          <div className="modal modal-lg" style={{ maxHeight: '90vh', overflowY: 'auto' }}>
+   785→            <button className="mx" onClick={() => setEditTask(null)}>✕</button>
+   786→            <div className="mt">Edit Task</div>
+   787→            <div className="ms">{editTask.title}</div>
+   788→            <div className="gold-divider" />
+   789→
+   790→            <div className="form-row fr-1">
+   791→              <div className="fg">
+   792→                <label>Title</label>
+   793→                <input className="fi" value={editTask.title} onChange={e => setEditTask({ ...editTask, title: e.target.value })} />
+   794→              </div>
+   795→            </div>
+   796→            <div className="form-row fr-1">
+   797→              <div className="fg">
+   798→                <label>Description</label>
+   799→                <textarea className="fi" value={editTask.description || ''} onChange={e => setEditTask({ ...editTask, description: e.target.value })} rows={3} />
+   800→              </div>
+   801→            </div>
+   802→            <div className="form-row fr-3">
+   803→              <div className="fg">
+   804→                <label>Priority</label>
+   805→                <select className="fi" value={editTask.priority || 'MEDIUM'} onChange={e => setEditTask({ ...editTask, priority: e.target.value })}>
+   806→                  <option value="CRITICAL">CRITICAL</option>
+   807→                  <option value="HIGH">HIGH</option>
+   808→                  <option value="MEDIUM">MEDIUM</option>
+   809→                  <option value="LOW">LOW</option>
+   810→                </select>
+   811→              </div>
+   812→              <div className="fg">
+   813→                <label>Department</label>
+   814→                <select className="fi" value={editTask.department || ''} onChange={e => setEditTask({ ...editTask, department: e.target.value })}>
+   815→                  <option value="">Select</option>
+   816→                  {['Sales', 'Account', 'HR', 'Coordinator', 'Admin', 'Back Office'].map(d => <option key={d} value={d}>{d}</option>)}
+   817→                </select>
+   818→              </div>
+   819→              <div className="fg">
+   820→                <label>Category</label>
+   821→                <select className="fi" value={editTask.category || ''} onChange={e => setEditTask({ ...editTask, category: e.target.value })}>
+   822→                  {['Routine Work', 'Reconciliation', 'One Time Work', 'Compliance', 'Operations', 'Procurement'].map(c => <option key={c} value={c}>{c}</option>)}
+   823→                </select>
+   824→              </div>
+   825→            </div>
+   826→            <div className="form-row fr-1">
+   827→              <div className="fg">
+   828→                <label>Due Date</label>
+   829→                <input className="fi" type="date" value={editTask.dueDate ? new Date(editTask.dueDate).toISOString().split('T')[0] : ''} onChange={e => setEditTask({ ...editTask, dueDate: e.target.value || null })} />
+   830→              </div>
+   831→            </div>
+   832→
+   833→            <div className="form-actions" style={{ marginTop: 16 }}>
+   834→              <button type="button" className="btn btn-ghost" onClick={() => setEditTask(null)}>Cancel</button>
+   835→              <button type="button" className="btn btn-gold" onClick={() => editMutation.mutate({ id: editTask.id, data: { title: editTask.title, description: editTask.description, priority: editTask.priority, department: editTask.department, category: editTask.category, dueDate: editTask.dueDate || null } })} disabled={editMutation.isPending}>
+   836→                {editMutation.isPending ? 'Saving...' : '✓ Save Changes'}
+   837→              </button>
+   838→            </div>
+   839→          </div>
+   840→        </div>
+   841→      )}
+   842→
+   843→      {/* Confirm Delete/Cancel Dialog */}
+   844→      {confirmAction && (
+   845→        <div className="overlay show" onClick={e => { if (e.target === e.currentTarget) setConfirmAction(null) }}>
+   846→          <div className="modal modal-sm" onClick={e => e.stopPropagation()}>
+   847→            <button className="mx" onClick={() => setConfirmAction(null)}>✕</button>
+   848→            <div className="mt">Confirm {confirmAction.action === 'delete' ? 'Delete' : 'Cancel'}</div>
+   849→            <div className="ms">Are you sure you want to {confirmAction.action === 'delete' ? 'delete' : 'cancel'} this task? This action cannot be undone.</div>
+   850→            <div className="form-actions">
+   851→              <button className="btn btn-ghost" onClick={() => setConfirmAction(null)}>No, Keep It</button>
+   852→              <button className={confirmAction.action === 'delete' ? 'btn btn-red' : 'btn btn-gold'} onClick={() => {
+   853→                if (confirmAction.action === 'delete') deleteMutation.mutate(confirmAction.id)
+   854→                else cancelMutation.mutate({ id: confirmAction.id })
+   855→              }}>
+   856→                Yes, {confirmAction.action === 'delete' ? 'Delete' : 'Cancel'}
+   857→              </button>
+   858→            </div>
+   859→          </div>
+   860→        </div>
+   861→      )}
+   862→
+   863→      {/* Revise Task Modal — Ask reason + next date */}
+   864→      {reviseTask && (
+   865→        <div className="overlay show" onClick={e => { if (e.target === e.currentTarget) { setReviseTask(null); setReviseReason(''); setReviseNextDate('') } }}>
+   866→          <div className="modal modal-md" onClick={e => e.stopPropagation()}>
+   867→            <button className="mx" onClick={() => { setReviseTask(null); setReviseReason(''); setReviseNextDate('') }}>✕</button>
+   868→            <div className="mt">Revise Task</div>
+   869→            <div className="ms">{reviseTask.title}</div>
+   870→            <div className="gold-divider" />
+   871→
+   872→            <div style={{ padding: '8px 12px', background: 'var(--amber-l)', borderRadius: 8, marginBottom: 14, fontSize: 12, color: 'var(--amber)', fontWeight: 600 }}>
+   873→              Please provide a reason for revision and a new target date.
+   874→            </div>
+   875→
+   876→            <div className="form-row fr-1">
+   877→              <div className="fg">
+   878→                <label>Reason for Revision <span style={{ color: 'var(--red)' }}>*</span></label>
+   879→                <textarea
+   880→                  className="fi"
+   881→                  placeholder="e.g. Incomplete work, quality issues, needs correction..."
+   882→                  value={reviseReason}
+   883→                  onChange={e => setReviseReason(e.target.value)}
+   884→                  rows={3}
+   885→                  style={{ minHeight: 80 }}
+   886→                />
+   887→              </div>
+   888→            </div>
+   889→            <div className="form-row fr-1">
+   890→              <div className="fg">
+   891→                <label>Next Target Date</label>
+   892→                <input
+   893→                  className="fi"
+   894→                  type="date"
+   895→                  value={reviseNextDate}
+   896→                  onChange={e => setReviseNextDate(e.target.value)}
+   897→                />
+   898→              </div>
+   899→            </div>
+   900→
+   901→            <div className="form-actions" style={{ marginTop: 16 }}>
+   902→              <button className="btn btn-ghost" onClick={() => { setReviseTask(null); setReviseReason(''); setReviseNextDate('') }}>Cancel</button>
+   903→              <button
+   904→                className="btn btn-gold"
+   905→                onClick={() => reviseMutation.mutate({ id: reviseTask.id, reason: reviseReason, nextDate: reviseNextDate })}
+   906→                disabled={reviseMutation.isPending || !reviseReason.trim()}
+   907→              >
+   908→                {reviseMutation.isPending ? 'Reopening...' : '↩ Revise Task'}
+   909→              </button>
+   910→            </div>
+   911→          </div>
+   912→        </div>
+   913→      )}
+   914→    </>
+   915→  )
+   916→}
+   917→

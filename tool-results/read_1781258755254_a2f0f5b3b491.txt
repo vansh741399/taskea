@@ -1,0 +1,1067 @@
+     1→'use client'
+     2→
+     3→import { useWorkflowStore } from '@/stores/workflow-store'
+     4→import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+     5→import { LaxreeDashboard } from '@/components/laxree/laxree-dashboard'
+     6→import { LaxreeCreateTask } from '@/components/laxree/laxree-create-task'
+     7→import { LaxreeTasks } from '@/components/laxree/laxree-tasks'
+     8→// Approval center and director dependency removed - simplified workflow
+     9→import { LaxreeExtHold } from '@/components/laxree/laxree-exthold'
+    10→import { LaxreeEscalations } from '@/components/laxree/laxree-escalations'
+    11→import { LaxreeMonday } from '@/components/laxree/laxree-monday'
+    12→import { LaxreeSidebar } from '@/components/laxree/laxree-sidebar'
+    13→import { LaxreeTopbar } from '@/components/laxree/laxree-topbar'
+    14→import { LaxreeCommandPalette } from '@/components/laxree/laxree-command-palette'
+    15→import { LaxreeNotifPanel } from '@/components/laxree/laxree-notif-panel'
+    16→import { LaxreeLogin } from '@/components/laxree/laxree-login'
+    17→import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from 'recharts'
+    18→import { Component, useEffect, useState, Suspense, type ReactNode } from 'react'
+    19→
+    20→/* ═══════════════════════════════════════════════════════════
+    21→   Error Boundary
+    22→   ═══════════════════════════════════════════════════════════ */
+    23→interface ErrorBoundaryProps {
+    24→  children: ReactNode
+    25→  fallback?: ReactNode
+    26→}
+    27→
+    28→interface ErrorBoundaryState {
+    29→  hasError: boolean
+    30→  error: Error | null
+    31→}
+    32→
+    33→class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
+    34→  constructor(props: ErrorBoundaryProps) {
+    35→    super(props)
+    36→    this.state = { hasError: false, error: null }
+    37→  }
+    38→
+    39→  static getDerivedStateFromError(error: Error) {
+    40→    return { hasError: true, error }
+    41→  }
+    42→
+    43→  componentDidCatch(error: Error, errorInfo: React.ErrorInfo) {
+    44→    console.error('View rendering error:', error, errorInfo)
+    45→  }
+    46→
+    47→  render() {
+    48→    if (this.state.hasError) {
+    49→      if (this.props.fallback) return this.props.fallback
+    50→      return (
+    51→        <div style={{ padding: 40, textAlign: 'center', color: '#333' }}>
+    52→          <div style={{ fontSize: 32, marginBottom: 12 }}>⚠️</div>
+    53→          <div style={{ fontSize: 16, fontWeight: 700, marginBottom: 8 }}>Something went wrong</div>
+    54→          <div style={{ fontSize: 12, color: '#666', marginBottom: 16 }}>
+    55→            {this.state.error?.message || 'An unexpected error occurred'}
+    56→          </div>
+    57→          <button
+    58→            style={{ padding: '8px 20px', background: '#B8860B', color: '#fff', border: 'none', borderRadius: 8, cursor: 'pointer', fontWeight: 700 }}
+    59→            onClick={() => this.setState({ hasError: false, error: null })}
+    60→          >
+    61→            Try Again
+    62→          </button>
+    63→        </div>
+    64→      )
+    65→    }
+    66→    return this.props.children
+    67→  }
+    68→}
+    69→
+    70→function ActiveView() {
+    71→  const { activePage } = useWorkflowStore()
+    72→
+    73→  const renderView = () => {
+    74→    switch (activePage) {
+    75→      case 'dashboard':
+    76→        return <LaxreeDashboard />
+    77→      case 'executive':
+    78→        return <ExecutiveView />
+    79→      // approvals removed
+    80→      case 'tasks':
+    81→        return <LaxreeTasks />
+    82→      case 'cancelled':
+    83→        return <LaxreeTasks showCancelled />
+    84→      case 'analytics':
+    85→        return <AnalyticsView />
+    86→      case 'performance':
+    87→        return <PerformanceView />
+    88→      case 'departments':
+    89→        return <DepartmentsView />
+    90→      case 'team':
+    91→        return <TeamView />
+    92→      case 'categories':
+    93→        return <CategoriesView />
+    94→      case 'holidays':
+    95→        return <HolidaysView />
+    96→      // dirDep removed
+    97→      case 'exthold':
+    98→        return <LaxreeExtHold />
+    99→      case 'escalations':
+   100→        return <LaxreeEscalations />
+   101→      case 'monday':
+   102→      case 'workflows':
+   103→        return <LaxreeMonday />
+   104→      case 'notifications':
+   105→        return <div style={{ padding: 40, textAlign: 'center', color: 'var(--t3)' }}>Notifications coming soon</div>
+   106→      case 'employees':
+   107→        return <EmployeesView />
+   108→      case 'projects':
+   109→        return <ProjectsView />
+   110→      case 'reports':
+   111→        return <ReportsView />
+   112→      case 'scorecards':
+   113→        return <ScorecardsView />
+   114→      case 'settings':
+   115→        return <SettingsView />
+   116→      default:
+   117→        return <LaxreeDashboard />
+   118→    }
+   119→  }
+   120→
+   121→  return (
+   122→    <ErrorBoundary>
+   123→      <Suspense fallback={<div style={{ padding: 40, textAlign: 'center', color: 'var(--t3)' }}>Loading…</div>}>
+   124→        {renderView()}
+   125→      </Suspense>
+   126→    </ErrorBoundary>
+   127→  )
+   128→}
+   129→
+   130→/* ═══════════════════════════════════════════════════════════
+   131→   Executive View
+   132→   ═══════════════════════════════════════════════════════════ */
+   133→function ExecutiveView() {
+   134→  const { currentUserId } = useWorkflowStore()
+   135→
+   136→  const { data, isLoading } = useQuery({
+   137→    queryKey: ['dashboard', currentUserId],
+   138→    queryFn: () => fetch(`/api/dashboard?userId=${currentUserId}`).then(r => r.json()),
+   139→  })
+   140→
+   141→  if (isLoading) return <div style={{ padding: 40, textAlign: 'center', color: 'var(--t3)' }}>Loading executive data…</div>
+   142→
+   143→  const d = data as any
+   144→  const score = d?.performanceScore || d?.completionRate || 0
+   145→  const userPerf = d?.userPerformance || []
+   146→  const deptMap = d?.deptMap || {}
+   147→
+   148→  return (
+   149→    <div>
+   150→      <div className="ph">
+   151→        <div className="ph-left">
+   152→          <h2>Executive Command Center</h2>
+   153→          <p>C-Suite operational intelligence · Real-time business health overview</p>
+   154→        </div>
+   155→        <div className="ph-right">
+   156→          <span className="badge b-green">● Live Feed</span>
+   157→        </div>
+   158→      </div>
+   159→      <div className="page-accent" />
+   160→
+   161→      <div className="g2">
+   162→        <div className="lcard">
+   163→          <div className="ch"><div className="ct">🏆 Business Health Score</div></div>
+   164→          <div className="cb" style={{ textAlign: 'center', padding: 30 }}>
+   165→            <div className="health-val" style={{ color: score >= 70 ? 'var(--green)' : score >= 40 ? 'var(--amber)' : 'var(--red)' }}>{score}</div>
+   166→            <div className="health-lbl">Overall Score</div>
+   167→            <div className="health-status" style={{
+   168→              background: score >= 70 ? 'var(--green-l)' : score >= 40 ? 'var(--amber-l)' : 'var(--red-l)',
+   169→              color: score >= 70 ? 'var(--green)' : score >= 40 ? 'var(--amber)' : 'var(--red)',
+   170→            }}>
+   171→              {score >= 70 ? 'Healthy' : score >= 40 ? 'Needs Attention' : 'Critical'}
+   172→            </div>
+   173→          </div>
+   174→        </div>
+   175→        <div className="ai-widget">
+   176→          <div className="ai-label"><div className="ai-pulse" />CEO AI Briefing</div>
+   177→          <div className="ai-item">
+   178→            <div className="ai-bullet" style={{ background: score >= 70 ? 'var(--green)' : 'var(--amber)' }} />
+   179→            <div className="ai-text"><strong>Operations {score >= 70 ? 'stable' : 'need attention'}.</strong> Overall score at {score}%.</div>
+   180→          </div>
+   181→
+   182→          <div className="ai-item">
+   183→            <div className="ai-bullet" style={{ background: 'var(--red)' }} />
+   184→            <div className="ai-text"><strong>{d?.overdueTasks || 0} overdue tasks</strong> require director intervention.</div>
+   185→          </div>
+   186→          {userPerf.length > 0 && (
+   187→            <div className="ai-item">
+   188→              <div className="ai-bullet" style={{ background: 'var(--g2)' }} />
+   189→              <div className="ai-text"><strong>Top performer:</strong> {userPerf[0]?.name} (score: {userPerf[0]?.score}).</div>
+   190→            </div>
+   191→          )}
+   192→        </div>
+   193→      </div>
+   194→
+   195→      <div className="stat-grid sg-4" style={{ marginBottom: 14 }}>
+   196→        <div className="sc lux-border">
+   197→          <div className="sc-accent" style={{ background: 'var(--g2)' }} />
+   198→          <div className="sc-top"><div><div className="sc-label">Total Tasks</div><div className="sc-val c-gold">{d?.totalTasks || 0}</div></div><div className="sc-icon" style={{ background: 'var(--gb)' }}>📋</div></div>
+   199→        </div>
+   200→        <div className="sc lux-border">
+   201→          <div className="sc-accent" style={{ background: 'var(--green)' }} />
+   202→          <div className="sc-top"><div><div className="sc-label">Completed</div><div className="sc-val c-green">{d?.completedTasks || 0}</div></div><div className="sc-icon" style={{ background: 'var(--green-m)' }}>✅</div></div>
+   203→        </div>
+   204→        <div className="sc lux-border">
+   205→          <div className="sc-accent" style={{ background: 'var(--amber)' }} />
+   206→          <div className="sc-top"><div><div className="sc-label">In Progress</div><div className="sc-val c-amber">{d?.inProgressTasks || 0}</div></div><div className="sc-icon" style={{ background: 'var(--amber-m)' }}>🔄</div></div>
+   207→        </div>
+   208→        <div className="sc lux-border">
+   209→          <div className="sc-accent" style={{ background: 'var(--red)' }} />
+   210→          <div className="sc-top"><div><div className="sc-label">Overdue</div><div className="sc-val c-red">{d?.overdueTasks || 0}</div></div><div className="sc-icon" style={{ background: 'var(--red-m)' }}>⚠</div></div>
+   211→        </div>
+   212→      </div>
+   213→
+   214→      <div className="lcard">
+   215→        <div className="ch"><div className="ct">🏢 Department Breakdown</div><span className="badge b-gold f10">Live</span></div>
+   216→        <div className="cb">
+   217→          {Object.entries(deptMap).map(([name, v]: [string, any]) => {
+   218→            const rate = v.total > 0 ? Math.round((v.done / v.total) * 100) : 0
+   219→            return (
+   220→              <div key={name} style={{ marginBottom: 14 }}>
+   221→                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
+   222→                  <span style={{ fontSize: 13, fontWeight: 700 }}>{name}</span>
+   223→                  <span style={{ fontSize: 11, color: 'var(--t3)' }}>{v.done}/{v.total} · {rate}%</span>
+   224→                </div>
+   225→                <div className="prog">
+   226→                  <div className="prog-bg" style={{ height: 8 }}>
+   227→                    <div className="prog-fill" style={{ width: `${rate}%`, background: rate >= 70 ? 'var(--green)' : rate >= 40 ? 'var(--amber)' : 'var(--red)', height: '100%' }} />
+   228→                  </div>
+   229→                </div>
+   230→              </div>
+   231→            )
+   232→          })}
+   233→        </div>
+   234→      </div>
+   235→    </div>
+   236→  )
+   237→}
+   238→
+   239→/* ═══════════════════════════════════════════════════════════
+   240→   Analytics View
+   241→   ═══════════════════════════════════════════════════════════ */
+   242→function AnalyticsView() {
+   243→  const { currentUserId } = useWorkflowStore()
+   244→
+   245→  const { data } = useQuery({
+   246→    queryKey: ['dashboard', currentUserId],
+   247→    queryFn: () => fetch(`/api/dashboard?userId=${currentUserId}`).then(r => r.json()),
+   248→  })
+   249→
+   250→  const d = data as any
+   251→  const deptMap = d?.deptMap || {}
+   252→  const deptChartData = Object.entries(deptMap).map(([name, v]: [string, any]) => ({
+   253→    name, Total: v.total, Completed: v.done, Overdue: v.overdue,
+   254→  }))
+   255→  const catMap = d?.catMap || {}
+   256→
+   257→  return (
+   258→    <div>
+   259→      <div className="ph">
+   260→        <div className="ph-left">
+   261→          <h2>Analytics &amp; Reports</h2>
+   262→          <p>Business intelligence &amp; operational reporting hub</p>
+   263→        </div>
+   264→        <div className="ph-right">
+   265→          <span className="badge b-gold">● Live</span>
+   266→        </div>
+   267→      </div>
+   268→      <div className="page-accent" />
+   269→
+   270→      <div className="stat-grid sg-4" style={{ marginBottom: 16 }}>
+   271→        <div className="sc"><div className="sc-accent" style={{ background: 'var(--g2)' }} /><div className="sc-top"><div><div className="sc-label">Total Tasks</div><div className="sc-val c-gold">{d?.totalTasks || 0}</div></div></div></div>
+   272→        <div className="sc"><div className="sc-accent" style={{ background: 'var(--green)' }} /><div className="sc-top"><div><div className="sc-label">Completed</div><div className="sc-val c-green">{d?.completedTasks || 0}</div></div></div></div>
+   273→        <div className="sc"><div className="sc-accent" style={{ background: 'var(--amber)' }} /><div className="sc-top"><div><div className="sc-label">In Progress</div><div className="sc-val c-amber">{d?.inProgressTasks || 0}</div></div></div></div>
+   274→        <div className="sc"><div className="sc-accent" style={{ background: 'var(--red)' }} /><div className="sc-top"><div><div className="sc-label">Overdue</div><div className="sc-val c-red">{d?.overdueTasks || 0}</div></div></div></div>
+   275→      </div>
+   276→
+   277→      <div className="g2">
+   278→        <div className="lcard">
+   279→          <div className="ch"><div className="ct">📊 Department Performance</div><span className="badge b-gold f10">Live</span></div>
+   280→          <div className="cb">
+   281→            {deptChartData.length > 0 ? (
+   282→              <div style={{ height: 260 }}>
+   283→                <ResponsiveContainer width="100%" height="100%">
+   284→                  <BarChart data={deptChartData} margin={{ top: 5, right: 10, left: -10, bottom: 5 }}>
+   285→                    <CartesianGrid strokeDasharray="3 3" stroke="var(--b1)" />
+   286→                    <XAxis dataKey="name" tick={{ fontSize: 10, fill: 'var(--t3)' }} />
+   287→                    <YAxis tick={{ fontSize: 10, fill: 'var(--t3)' }} />
+   288→                    <Tooltip contentStyle={{ background: 'var(--card)', border: '1px solid var(--b2)', borderRadius: 'var(--r-sm)', fontSize: 12 }} />
+   289→                    <Bar dataKey="Total" fill="var(--blue)" radius={[4, 4, 0, 0]} />
+   290→                    <Bar dataKey="Completed" fill="var(--green)" radius={[4, 4, 0, 0]} />
+   291→                    <Bar dataKey="Overdue" fill="var(--red)" radius={[4, 4, 0, 0]} />
+   292→                  </BarChart>
+   293→                </ResponsiveContainer>
+   294→              </div>
+   295→            ) : (
+   296→              <div className="empty"><p>No data yet</p></div>
+   297→            )}
+   298→          </div>
+   299→        </div>
+   300→        <div className="lcard">
+   301→          <div className="ch"><div className="ct">📂 Category Distribution</div></div>
+   302→          <div className="cb">
+   303→            {Object.entries(catMap).length > 0 ? Object.entries(catMap).map(([name, v]: [string, any]) => {
+   304→              const rate = v.total > 0 ? Math.round((v.done / v.total) * 100) : 0
+   305→              return (
+   306→                <div key={name} style={{ marginBottom: 12 }}>
+   307→                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
+   308→                    <span style={{ fontSize: 12.5, fontWeight: 700 }}>{name}</span>
+   309→                    <span style={{ fontSize: 11, color: 'var(--t3)' }}>{v.done}/{v.total} · {rate}%</span>
+   310→                  </div>
+   311→                  <div className="prog">
+   312→                    <div className="prog-bg"><div className="prog-fill" style={{ width: `${rate}%`, background: rate >= 70 ? 'var(--green)' : rate >= 40 ? 'var(--amber)' : 'var(--red)' }} /></div>
+   313→                  </div>
+   314→                </div>
+   315→              )
+   316→            }) : (
+   317→              <div className="empty"><p>No category data</p></div>
+   318→            )}
+   319→          </div>
+   320→        </div>
+   321→      </div>
+   322→
+   323→      <div className="ai-widget" style={{ marginTop: 14 }}>
+   324→        <div className="ai-label"><div className="ai-pulse" />AI Insights</div>
+   325→        <div className="ai-item">
+   326→          <div className="ai-bullet" style={{ background: 'var(--g2)' }} />
+   327→          <div className="ai-text"><strong>Completion rate:</strong> {d?.completionRate || 0}% across all departments.</div>
+   328→        </div>
+   329→        <div className="ai-item">
+   330→          <div className="ai-bullet" style={{ background: 'var(--amber)' }} />
+   331→          <div className="ai-text"><strong>{d?.pendingTasks || 0} pending tasks</strong> awaiting action from team members.</div>
+   332→        </div>
+   333→      </div>
+   334→    </div>
+   335→  )
+   336→}
+   337→
+   338→/* ═══════════════════════════════════════════════════════════
+   339→   Performance View
+   340→   ═══════════════════════════════════════════════════════════ */
+   341→function PerformanceView() {
+   342→  const { currentUserId } = useWorkflowStore()
+   343→  const { data } = useQuery({
+   344→    queryKey: ['dashboard', currentUserId],
+   345→    queryFn: () => fetch(`/api/dashboard?userId=${currentUserId}`).then(r => r.json()),
+   346→  })
+   347→  const d = data as any
+   348→  const userPerf = d?.userPerformance || []
+   349→  const getInitials = (name: string) => name.split(' ').map((n: string) => n[0]).join('').toUpperCase().slice(0, 2)
+   350→  const scoreColor = (score: number) => score >= 70 ? 'var(--green)' : score >= 40 ? 'var(--amber)' : 'var(--red)'
+   351→
+   352→  return (
+   353→    <div>
+   354→      <div className="ph"><div className="ph-left"><h2>Performance Intelligence</h2><p>Deep-dive employee analytics &amp; comparison engine</p></div></div>
+   355→      <div className="page-accent" />
+   356→      <div className="mc-grid">
+   357→        {userPerf.map((u: any) => (
+   358→          <div key={u.id} className="mc">
+   359→            <div className="mc-top">
+   360→              <div className="av" style={{ width: 36, height: 36, fontSize: 13, background: `linear-gradient(135deg,${scoreColor(u.score)},${scoreColor(u.score)}88)` }}>{getInitials(u.name)}</div>
+   361→              <div className="mc-info"><div className="mc-name">{u.name}</div><div className="mc-role">{u.role} · {u.department || '—'}</div></div>
+   362→            </div>
+   363→            <div className="mc-stat"><span>Total Tasks</span><span>{u.total}</span></div>
+   364→            <div className="mc-stat"><span>Completed</span><span style={{ color: 'var(--green)' }}>{u.done}</span></div>
+   365→            <div className="mc-stat"><span>In Progress</span><span style={{ color: 'var(--blue)' }}>{u.inProgress}</span></div>
+   366→            <div className="mc-stat"><span>Overdue</span><span style={{ color: u.overdue > 0 ? 'var(--red)' : 'var(--t2)' }}>{u.overdue}</span></div>
+   367→            <div className="prog" style={{ marginTop: 8 }}><div className="prog-bg"><div className="prog-fill" style={{ width: `${u.completionRate}%`, background: scoreColor(u.score) }} /></div><span className="prog-lbl">{u.completionRate}%</span></div>
+   368→            <div className="mc-score"><span>Score:</span><span style={{ fontSize: 18, color: scoreColor(u.score) }}>{u.score}</span></div>
+   369→          </div>
+   370→        ))}
+   371→      </div>
+   372→    </div>
+   373→  )
+   374→}
+   375→
+   376→/* ═══════════════════════════════════════════════════════════
+   377→   Departments View
+   378→   ═══════════════════════════════════════════════════════════ */
+   379→function DepartmentsView() {
+   380→  const { currentUserId } = useWorkflowStore()
+   381→  const { data } = useQuery({
+   382→    queryKey: ['dashboard', currentUserId],
+   383→    queryFn: () => fetch(`/api/dashboard?userId=${currentUserId}`).then(r => r.json()),
+   384→  })
+   385→  const d = data as any
+   386→  const deptMap = d?.deptMap || {}
+   387→  const userPerf = d?.userPerformance || []
+   388→  const deptColors: Record<string, string> = { 'Sales': 'var(--blue)', 'Back Office': 'var(--amber)', 'Accounts': 'var(--green)' }
+   389→
+   390→  return (
+   391→    <div>
+   392→      <div className="ph"><div className="ph-left"><h2>Departments</h2><p>Department structure and productivity analysis</p></div></div>
+   393→      <div className="page-accent" />
+   394→      <div className="mc-grid">
+   395→        {Object.entries(deptMap).map(([name, v]: [string, any]) => {
+   396→          const rate = v.total > 0 ? Math.round((v.done / v.total) * 100) : 0
+   397→          const color = deptColors[name] || 'var(--g2)'
+   398→          const deptUsers = userPerf.filter((u: any) => u.department === name)
+   399→          return (
+   400→            <div key={name} className="dept-card" style={{ borderLeft: `3px solid ${color}` }}>
+   401→              <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12 }}>
+   402→                <div style={{ width: 40, height: 40, borderRadius: 10, background: `${color}18`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 20 }}>🏢</div>
+   403→                <div><div style={{ fontSize: 15, fontWeight: 800, color: 'var(--t1)' }}>{name}</div><div style={{ fontSize: 11, color: 'var(--t3)' }}>{deptUsers.length} members</div></div>
+   404→              </div>
+   405→              <div className="mc-stat"><span>Total Tasks</span><span>{v.total}</span></div>
+   406→              <div className="mc-stat"><span>Completed</span><span style={{ color: 'var(--green)' }}>{v.done}</span></div>
+   407→              <div className="mc-stat"><span>In Progress</span><span style={{ color: 'var(--blue)' }}>{v.inProgress}</span></div>
+   408→              <div className="mc-stat"><span>Overdue</span><span style={{ color: v.overdue > 0 ? 'var(--red)' : 'var(--t2)' }}>{v.overdue}</span></div>
+   409→              <div className="prog" style={{ marginTop: 8 }}><div className="prog-bg"><div className="prog-fill" style={{ width: `${rate}%`, background: color }} /></div><span className="prog-lbl">{rate}%</span></div>
+   410→            </div>
+   411→          )
+   412→        })}
+   413→      </div>
+   414→    </div>
+   415→  )
+   416→}
+   417→
+   418→/* ═══════════════════════════════════════════════════════════
+   419→   Team View
+   420→   ═══════════════════════════════════════════════════════════ */
+   421→function TeamView() {
+   422→  const { currentUserId } = useWorkflowStore()
+   423→  const qc = useQueryClient()
+   424→  const [showAddDialog, setShowAddDialog] = useState(false)
+   425→  const [addForm, setAddForm] = useState({ name: '', email: '', role: 'EMPLOYEE', department: '', designation: '', phone: '', location: '' })
+   426→  const [removeConfirm, setRemoveConfirm] = useState<string | null>(null)
+   427→  const [teamTab, setTeamTab] = useState('active')
+   428→
+   429→  const { data: users = [] } = useQuery({ queryKey: ['users-list'], queryFn: () => fetch('/api/users').then(r => r.json()) })
+   430→  const { data } = useQuery({ queryKey: ['dashboard', currentUserId], queryFn: () => fetch(`/api/dashboard?userId=${currentUserId}`).then(r => r.json()) })
+   431→  const d = data as any
+   432→  const userPerf = d?.userPerformance || []
+   433→  const getInitials = (name: string) => name.split(' ').map((n: string) => n[0]).join('').toUpperCase().slice(0, 2)
+   434→  const roleBadge: Record<string, string> = { ADMIN: 'b-gold', DIRECTOR: 'b-purple', EA: 'b-blue', MANAGER: 'b-green', EMPLOYEE: 'b-gray' }
+   435→
+   436→  // Fetch ALL users (including inactive) for full team view
+   437→  const { data: allUsersData } = useQuery({
+   438→    queryKey: ['all-users-team'],
+   439→    queryFn: () => fetch('/api/employees').then(r => r.json()),
+   440→  })
+   441→  const allUsers = (allUsersData as any)?.employees || []
+   442→  const activeUsers = allUsers.filter((u: any) => u.isActive)
+   443→  const inactiveUsers = allUsers.filter((u: any) => !u.isActive)
+   444→
+   445→  const displayUsers = teamTab === 'active' ? activeUsers : teamTab === 'inactive' ? inactiveUsers : allUsers
+   446→
+   447→  const addMutation = useMutation({
+   448→    mutationFn: (formData: typeof addForm) => fetch('/api/employees', {
+   449→      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(formData),
+   450→    }).then(async r => {
+   451→      const res = await r.json()
+   452→      if (!r.ok) throw new Error(res.error || 'Failed to add employee')
+   453→      return res
+   454→    }),
+   455→    onSuccess: () => {
+   456→      qc.invalidateQueries({ queryKey: ['users-list'] })
+   457→      qc.invalidateQueries({ queryKey: ['all-users-team'] })
+   458→      qc.invalidateQueries({ queryKey: ['dashboard'] })
+   459→      setShowAddDialog(false)
+   460→      setAddForm({ name: '', email: '', role: 'EMPLOYEE', department: '', designation: '', phone: '', location: '' })
+   461→    },
+   462→  })
+   463→
+   464→  const removeMutation = useMutation({
+   465→    mutationFn: (userId: string) => fetch(`/api/employees?userId=${userId}`, {
+   466→      method: 'DELETE',
+   467→    }).then(async r => {
+   468→      const res = await r.json()
+   469→      if (!r.ok) throw new Error(res.error || 'Failed to remove employee')
+   470→      return res
+   471→    }),
+   472→    onSuccess: (data: any) => {
+   473→      qc.invalidateQueries({ queryKey: ['users-list'] })
+   474→      qc.invalidateQueries({ queryKey: ['all-users-team'] })
+   475→      qc.invalidateQueries({ queryKey: ['dashboard'] })
+   476→      setRemoveConfirm(null)
+   477→    },
+   478→  })
+   479→
+   480→  const reactivateMutation = useMutation({
+   481→    mutationFn: (userId: string) => fetch('/api/employees', {
+   482→      method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+   483→      body: JSON.stringify({ userId, isActive: true }),
+   484→    }).then(r => r.json()),
+   485→    onSuccess: () => {
+   486→      qc.invalidateQueries({ queryKey: ['users-list'] })
+   487→      qc.invalidateQueries({ queryKey: ['all-users-team'] })
+   488→    },
+   489→  })
+   490→
+   491→  const tabs = [
+   492→    { id: 'active', label: 'Active', count: activeUsers.length },
+   493→    { id: 'inactive', label: 'Left / Inactive', count: inactiveUsers.length },
+   494→    { id: 'all', label: 'All', count: allUsers.length },
+   495→  ]
+   496→
+   497→  return (
+   498→    <div>
+   499→      <div className="ph">
+   500→        <div className="ph-left"><h2>Team Members</h2><p>Team management — add new members or remove those who left</p></div>
+   501→        <div className="ph-right" style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+   502→          <span className="badge b-gold">{activeUsers.length} Active</span>
+   503→          <button className="btn btn-gold" onClick={() => setShowAddDialog(true)}>+ Add Employee</button>
+   504→        </div>
+   505→      </div>
+   506→      <div className="page-accent" />
+   507→
+   508→      {/* Tabs */}
+   509→      <div className="tabs" style={{ marginBottom: 14 }}>
+   510→        {tabs.map(tab => (
+   511→          <div key={tab.id} className={`tab${teamTab === tab.id ? ' active' : ''}`}
+   512→            onClick={() => setTeamTab(tab.id)}>
+   513→            {tab.label}
+   514→            {tab.count > 0 && <span className="tab-cnt">{tab.count}</span>}
+   515→          </div>
+   516→        ))}
+   517→      </div>
+   518→
+   519→      <div className="mc-grid">
+   520→        {displayUsers.map((u: any) => {
+   521→          const perf = userPerf.find((p: any) => p.id === u.id)
+   522→          const score = perf?.score || 0
+   523→          const scoreCol = score >= 70 ? 'var(--green)' : score >= 40 ? 'var(--amber)' : 'var(--red)'
+   524→          const isRemoving = removeConfirm === u.id
+   525→
+   526→          return (
+   527→            <div key={u.id} className="mc" style={u.isActive ? {} : { opacity: 0.6, borderLeft: '3px solid var(--red)' }}>
+   528→              <div className="mc-top">
+   529→                <div className="av" style={{ width: 38, height: 38, fontSize: 14, background: u.isActive ? 'linear-gradient(135deg,var(--g1),var(--g3))' : 'var(--red)' }}>{getInitials(u.name)}</div>
+   530→                <div className="mc-info">
+   531→                  <div className="mc-name">{u.name}</div>
+   532→                  <div className="mc-role" style={{ display: 'flex', gap: 4, alignItems: 'center', flexWrap: 'wrap' }}>
+   533→                    <span className={`badge ${roleBadge[u.role] || 'b-gray'}`} style={{ fontSize: 9, padding: '1px 6px' }}>{u.role}</span>
+   534→                    <span>{u.department || '—'}</span>
+   535→                  </div>
+   536→                </div>
+   537→              </div>
+   538→              <div style={{ fontSize: 11, color: 'var(--t3)', marginBottom: 4 }}>{u.email}</div>
+   539→              {u.designation && <div style={{ fontSize: 10, color: 'var(--t3)', marginBottom: 4 }}>{u.designation}</div>}
+   540→              {u.phone && <div style={{ fontSize: 10, color: 'var(--t3)', marginBottom: 4 }}>📞 {u.phone}</div>}
+   541→              {perf && u.isActive && (
+   542→                <>
+   543→                  <div className="mc-stat"><span>Tasks</span><span>{perf.total}</span></div>
+   544→                  <div className="mc-stat"><span>Completed</span><span>{perf.done}</span></div>
+   545→                  <div className="mc-stat"><span>Overdue</span><span style={{ color: perf.overdue > 0 ? 'var(--red)' : 'var(--t2)' }}>{perf.overdue}</span></div>
+   546→                  <div className="mc-score"><span>Score:</span><span style={{ fontSize: 18, color: scoreCol }}>{score}</span></div>
+   547→                </>
+   548→              )}
+   549→              <div style={{ marginTop: 8, display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
+   550→                <span className={`badge ${u.isActive ? 'b-green' : 'b-red'}`} style={{ fontSize: 10 }}>
+   551→                  {u.isActive ? '● Active' : '● Left'}
+   552→                </span>
+   553→                {u.isActive && u.role !== 'ADMIN' && (
+   554→                  isRemoving ? (
+   555→                    <div style={{ display: 'flex', gap: 4 }}>
+   556→                      <button className="btn btn-red btn-sm" style={{ fontSize: 10, padding: '2px 8px' }}
+   557→                        onClick={() => removeMutation.mutate(u.id)} disabled={removeMutation.isPending}>
+   558→                        {removeMutation.isPending ? 'Removing...' : '✓ Confirm Remove'}
+   559→                      </button>
+   560→                      <button className="btn btn-ghost btn-sm" style={{ fontSize: 10, padding: '2px 8px' }}
+   561→                        onClick={() => setRemoveConfirm(null)}>Cancel</button>
+   562→                    </div>
+   563→                  ) : (
+   564→                    <button style={{ fontSize: 9, padding: '1px 6px', background: 'var(--red-l)', color: 'var(--red)',
+   565→                      border: '1px solid rgba(220,38,38,.3)', borderRadius: 4, cursor: 'pointer', fontWeight: 700 }}
+   566→                      onClick={() => setRemoveConfirm(u.id)}>
+   567→                      ✕ Remove
+   568→                    </button>
+   569→                  )
+   570→                )}
+   571→                {!u.isActive && (
+   572→                  <button style={{ fontSize: 9, padding: '1px 6px', background: 'var(--green-l)', color: 'var(--green)',
+   573→                    border: '1px solid rgba(21,128,61,.3)', borderRadius: 4, cursor: 'pointer', fontWeight: 700 }}
+   574→                    onClick={() => reactivateMutation.mutate(u.id)} disabled={reactivateMutation.isPending}>
+   575→                    ↩ Reactivate
+   576→                  </button>
+   577→                )}
+   578→              </div>
+   579→            </div>
+   580→          )
+   581→        })}
+   582→        {displayUsers.length === 0 && (
+   583→          <div className="lcard" style={{ gridColumn: '1 / -1' }}>
+   584→            <div className="cb" style={{ textAlign: 'center', padding: 40, color: 'var(--t3)' }}>
+   585→              <div style={{ fontSize: 32, marginBottom: 8 }}>👥</div>
+   586→              <div style={{ fontWeight: 700, fontSize: 14 }}>No team members found</div>
+   587→              <div style={{ fontSize: 12, marginTop: 4 }}>Click "+ Add Employee" to add a new team member</div>
+   588→            </div>
+   589→          </div>
+   590→        )}
+   591→      </div>
+   592→
+   593→      {/* Add Employee Dialog */}
+   594→      {showAddDialog && (
+   595→        <div className="overlay show" onClick={e => { if (e.target === e.currentTarget) setShowAddDialog(false) }}>
+   596→          <div className="modal modal-md" onClick={e => e.stopPropagation()}>
+   597→            <button className="mx" onClick={() => setShowAddDialog(false)}>✕</button>
+   598→            <div className="mt">Add New Employee</div>
+   599→            <div className="ms">Add a new team member to LAXREE</div>
+   600→            <div className="gold-divider" />
+   601→            <div className="form-row fr-2">
+   602→              <div className="fg">
+   603→                <label>Full Name <span style={{ color: 'var(--red)' }}>*</span></label>
+   604→                <input className="fi" placeholder="Enter full name" value={addForm.name} onChange={e => setAddForm({ ...addForm, name: e.target.value })} />
+   605→              </div>
+   606→              <div className="fg">
+   607→                <label>Email <span style={{ color: 'var(--red)' }}>*</span></label>
+   608→                <input className="fi" type="email" placeholder="Enter email" value={addForm.email} onChange={e => setAddForm({ ...addForm, email: e.target.value })} />
+   609→              </div>
+   610→            </div>
+   611→            <div className="form-row fr-2">
+   612→              <div className="fg">
+   613→                <label>Role</label>
+   614→                <select className="fi" value={addForm.role} onChange={e => setAddForm({ ...addForm, role: e.target.value })}>
+   615→                  <option value="EMPLOYEE">Employee</option>
+   616→                  <option value="MANAGER">Manager</option>
+   617→                  <option value="EA">EA (Executive Assistant)</option>
+   618→                  <option value="DIRECTOR">Director</option>
+   619→                </select>
+   620→              </div>
+   621→              <div className="fg">
+   622→                <label>Department</label>
+   623→                <select className="fi" value={addForm.department} onChange={e => setAddForm({ ...addForm, department: e.target.value })}>
+   624→                  <option value="">Select Department</option>
+   625→                  <option value="Sales">Sales</option>
+   626→                  <option value="Account">Account</option>
+   627→                  <option value="HR">HR</option>
+   628→                  <option value="Coordinator">Coordinator</option>
+   629→                  <option value="Back Office">Back Office</option>
+   630→                  <option value="Admin">Admin</option>
+   631→                  <option value="Management">Management</option>
+   632→                </select>
+   633→              </div>
+   634→            </div>
+   635→            <div className="form-row fr-2">
+   636→              <div className="fg">
+   637→                <label>Designation</label>
+   638→                <input className="fi" placeholder="e.g. Sales Executive" value={addForm.designation} onChange={e => setAddForm({ ...addForm, designation: e.target.value })} />
+   639→              </div>
+   640→              <div className="fg">
+   641→                <label>Phone</label>
+   642→                <input className="fi" placeholder="Enter phone number" value={addForm.phone} onChange={e => setAddForm({ ...addForm, phone: e.target.value })} />
+   643→              </div>
+   644→            </div>
+   645→            <div className="form-row fr-1">
+   646→              <div className="fg">
+   647→                <label>Location</label>
+   648→                <input className="fi" placeholder="e.g. Ajmer Office" value={addForm.location} onChange={e => setAddForm({ ...addForm, location: e.target.value })} />
+   649→              </div>
+   650→            </div>
+   651→            <div className="form-actions">
+   652→              <button className="btn btn-ghost" onClick={() => setShowAddDialog(false)}>Cancel</button>
+   653→              <button className="btn btn-gold" onClick={() => addMutation.mutate(addForm)} disabled={addMutation.isPending || !addForm.name || !addForm.email}>
+   654→                {addMutation.isPending ? 'Adding...' : '✓ Add Employee'}
+   655→              </button>
+   656→            </div>
+   657→          </div>
+   658→        </div>
+   659→      )}
+   660→    </div>
+   661→  )
+   662→}
+   663→
+   664→/* ═══════════════════════════════════════════════════════════
+   665→   Categories View
+   666→   ═══════════════════════════════════════════════════════════ */
+   667→function CategoriesView() {
+   668→  const { currentUserId } = useWorkflowStore()
+   669→  const { data } = useQuery({ queryKey: ['dashboard', currentUserId], queryFn: () => fetch(`/api/dashboard?userId=${currentUserId}`).then(r => r.json()) })
+   670→  const d = data as any
+   671→  const catMap = d?.catMap || {}
+   672→  const catIcons: Record<string, string> = { 'Operations': '⚙️', 'Finance': '💰', 'HR': '👥', 'IT': '💻', 'Marketing': '📢', 'Sales': '📊', 'Admin': '📋', 'Compliance': '🔒' }
+   673→
+   674→  return (
+   675→    <div>
+   676→      <div className="ph"><div className="ph-left"><h2>Categories</h2><p>Task and workflow category management</p></div></div>
+   677→      <div className="page-accent" />
+   678→      <div className="stat-grid sg-4" style={{ marginBottom: 16 }}>
+   679→        <div className="sc"><div className="sc-accent" style={{ background: 'var(--g2)' }} /><div className="sc-top"><div><div className="sc-label">Total Categories</div><div className="sc-val c-gold">{Object.keys(catMap).length}</div></div></div></div>
+   680→        <div className="sc"><div className="sc-accent" style={{ background: 'var(--blue)' }} /><div className="sc-top"><div><div className="sc-label">Total Tasks</div><div className="sc-val c-amber">{Object.values(catMap).reduce((s: number, v: any) => s + v.total, 0)}</div></div></div></div>
+   681→        <div className="sc"><div className="sc-accent" style={{ background: 'var(--green)' }} /><div className="sc-top"><div><div className="sc-label">Completed</div><div className="sc-val c-green">{Object.values(catMap).reduce((s: number, v: any) => s + v.done, 0)}</div></div></div></div>
+   682→        <div className="sc"><div className="sc-accent" style={{ background: 'var(--amber)' }} /><div className="sc-top"><div><div className="sc-label">In Progress</div><div className="sc-val c-amber">{Object.values(catMap).reduce((s: number, v: any) => s + v.inProgress, 0)}</div></div></div></div>
+   683→      </div>
+   684→      <div className="mc-grid">
+   685→        {Object.entries(catMap).map(([name, v]: [string, any]) => {
+   686→          const rate = v.total > 0 ? Math.round((v.done / v.total) * 100) : 0
+   687→          return (
+   688→            <div key={name} className="dept-card">
+   689→              <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12 }}>
+   690→                <div style={{ width: 40, height: 40, borderRadius: 10, background: 'var(--gb)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 20 }}>{catIcons[name] || '📁'}</div>
+   691→                <div><div style={{ fontSize: 14, fontWeight: 800 }}>{name}</div><div style={{ fontSize: 11, color: 'var(--t3)' }}>{v.total} tasks</div></div>
+   692→              </div>
+   693→              <div className="mc-stat"><span>Completed</span><span style={{ color: 'var(--green)' }}>{v.done}</span></div>
+   694→              <div className="mc-stat"><span>In Progress</span><span style={{ color: 'var(--blue)' }}>{v.inProgress}</span></div>
+   695→              <div className="prog" style={{ marginTop: 8 }}><div className="prog-bg"><div className="prog-fill" style={{ width: `${rate}%`, background: rate >= 70 ? 'var(--green)' : rate >= 40 ? 'var(--amber)' : 'var(--red)' }} /></div><span className="prog-lbl">{rate}%</span></div>
+   696→            </div>
+   697→          )
+   698→        })}
+   699→      </div>
+   700→    </div>
+   701→  )
+   702→}
+   703→
+   704→/* ═══════════════════════════════════════════════════════════
+   705→   Holidays View
+   706→   ═══════════════════════════════════════════════════════════ */
+   707→function HolidaysView() {
+   708→  const holidays = [
+   709→    { name: 'New Year\'s Day', date: '2025-01-01', type: 'PUBLIC' },
+   710→    { name: 'Republic Day', date: '2025-01-26', type: 'PUBLIC' },
+   711→    { name: 'Holi', date: '2025-03-14', type: 'PUBLIC' },
+   712→    { name: 'Good Friday', date: '2025-04-18', type: 'PUBLIC' },
+   713→    { name: 'Eid ul-Fitr', date: '2025-03-31', type: 'PUBLIC' },
+   714→    { name: 'Independence Day', date: '2025-08-15', type: 'PUBLIC' },
+   715→    { name: 'Gandhi Jayanti', date: '2025-10-02', type: 'PUBLIC' },
+   716→    { name: 'Dussehra', date: '2025-10-20', type: 'PUBLIC' },
+   717→    { name: 'Diwali', date: '2025-10-28', type: 'PUBLIC' },
+   718→    { name: 'Christmas', date: '2025-12-25', type: 'PUBLIC' },
+   719→    { name: 'Company Foundation Day', date: '2025-06-15', type: 'COMPANY' },
+   720→    { name: 'Year End Break', date: '2025-12-30', type: 'COMPANY' },
+   721→  ]
+   722→  const typeColors: Record<string, { bg: string; color: string }> = {
+   723→    PUBLIC: { bg: 'var(--blue-l)', color: 'var(--blue)' },
+   724→    COMPANY: { bg: 'var(--purple-l)', color: 'var(--purple)' },
+   725→    OPTIONAL: { bg: 'var(--amber-l)', color: 'var(--amber)' },
+   726→  }
+   727→
+   728→  return (
+   729→    <div>
+   730→      <div className="ph"><div className="ph-left"><h2>Holidays</h2><p>Holiday calendar and scheduling</p></div><div className="ph-right"><span className="badge b-gold">{holidays.length} Holidays</span></div></div>
+   731→      <div className="page-accent" />
+   732→      <div className="lcard">
+   733→        <div className="ch"><div className="ct">📅 Holiday Calendar 2025</div><div style={{ display: 'flex', gap: 8 }}><span className="badge" style={{ background: 'var(--blue-l)', color: 'var(--blue)' }}>Public</span><span className="badge" style={{ background: 'var(--purple-l)', color: 'var(--purple)' }}>Company</span></div></div>
+   734→        <div className="tw">
+   735→          <table className="ltable">
+   736→            <thead><tr><th>#</th><th>Holiday</th><th>Date</th><th>Day</th><th>Type</th></tr></thead>
+   737→            <tbody>
+   738→              {holidays.map((h, i) => (
+   739→                <tr key={i}>
+   740→                  <td style={{ color: 'var(--t3)', fontSize: 11 }}>{i + 1}</td>
+   741→                  <td style={{ fontWeight: 600 }}>{h.name}</td>
+   742→                  <td>{new Date(h.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}</td>
+   743→                  <td>{new Date(h.date).toLocaleDateString('en-US', { weekday: 'long' })}</td>
+   744→                  <td><span className="badge" style={{ background: typeColors[h.type]?.bg, color: typeColors[h.type]?.color }}>{h.type}</span></td>
+   745→                </tr>
+   746→              ))}
+   747→            </tbody>
+   748→          </table>
+   749→        </div>
+   750→      </div>
+   751→    </div>
+   752→  )
+   753→}
+   754→
+   755→/* ═══════════════════════════════════════════════════════════
+   756→   Employees View
+   757→   ═══════════════════════════════════════════════════════════ */
+   758→function EmployeesView() {
+   759→  const [showAddDialog, setShowAddDialog] = useState(false)
+   760→  const [addForm, setAddForm] = useState({ name: '', email: '', role: 'EMPLOYEE', department: '', designation: '', phone: '', location: '' })
+   761→  const [removeConfirm, setRemoveConfirm] = useState<string | null>(null)
+   762→  const [empTab, setEmpTab] = useState('active')
+   763→  const qc = useQueryClient()
+   764→
+   765→  const { data, isLoading } = useQuery({
+   766→    queryKey: ['employees'],
+   767→    queryFn: () => fetch('/api/employees').then(r => r.json()),
+   768→  })
+   769→
+   770→  const addMutation = useMutation({
+   771→    mutationFn: (formData: typeof addForm) => fetch('/api/employees', {
+   772→      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(formData),
+   773→    }).then(async r => {
+   774→      const res = await r.json()
+   775→      if (!r.ok) throw new Error(res.error || 'Failed to add employee')
+   776→      return res
+   777→    }),
+   778→    onSuccess: () => { qc.invalidateQueries({ queryKey: ['employees'] }); setShowAddDialog(false); setAddForm({ name: '', email: '', role: 'EMPLOYEE', department: '', designation: '', phone: '', location: '' }) },
+   779→  })
+   780→
+   781→  const removeMutation = useMutation({
+   782→    mutationFn: (userId: string) => fetch(`/api/employees?userId=${userId}`, { method: 'DELETE' }).then(async r => {
+   783→      const res = await r.json()
+   784→      if (!r.ok) throw new Error(res.error || 'Failed to remove')
+   785→      return res
+   786→    }),
+   787→    onSuccess: () => { qc.invalidateQueries({ queryKey: ['employees'] }); setRemoveConfirm(null) },
+   788→  })
+   789→
+   790→  const reactivateMutation = useMutation({
+   791→    mutationFn: (userId: string) => fetch('/api/employees', {
+   792→      method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+   793→      body: JSON.stringify({ userId, isActive: true }),
+   794→    }).then(r => r.json()),
+   795→    onSuccess: () => { qc.invalidateQueries({ queryKey: ['employees'] }) },
+   796→  })
+   797→
+   798→  const employees: any[] = (data as any)?.employees || []
+   799→  const stats = (data as any)?.stats || {}
+   800→  const activeEmps = employees.filter(e => e.isActive)
+   801→  const inactiveEmps = employees.filter(e => !e.isActive)
+   802→  const displayEmps = empTab === 'active' ? activeEmps : empTab === 'inactive' ? inactiveEmps : employees
+   803→
+   804→  if (isLoading) return <div style={{ padding: 40, textAlign: 'center', color: 'var(--t3)' }}>Loading employees…</div>
+   805→
+   806→  const tabs = [
+   807→    { id: 'active', label: 'Active', count: activeEmps.length },
+   808→    { id: 'inactive', label: 'Left / Inactive', count: inactiveEmps.length },
+   809→    { id: 'all', label: 'All', count: employees.length },
+   810→  ]
+   811→
+   812→  return (
+   813→    <div>
+   814→      <div className="ph">
+   815→        <div className="ph-left"><h2>Employees</h2><p>Employee directory and management</p></div>
+   816→        <div className="ph-right">
+   817→          <span className="badge b-gold" style={{ marginRight: 8 }}>{stats.active || 0} Active</span>
+   818→          <button className="btn btn-gold" onClick={() => setShowAddDialog(true)}>+ Add Employee</button>
+   819→        </div>
+   820→      </div>
+   821→      <div className="page-accent" />
+   822→
+   823→      {/* Tabs */}
+   824→      <div className="tabs" style={{ marginBottom: 14 }}>
+   825→        {tabs.map(tab => (
+   826→          <div key={tab.id} className={`tab${empTab === tab.id ? ' active' : ''}`}
+   827→            onClick={() => setEmpTab(tab.id)}>
+   828→            {tab.label}
+   829→            {tab.count > 0 && <span className="tab-cnt">{tab.count}</span>}
+   830→          </div>
+   831→        ))}
+   832→      </div>
+   833→
+   834→      <div className="lcard">
+   835→        <div className="ch"><div className="ct">👥 Employee Directory</div><span className="badge b-gold">{employees.length} employees</span></div>
+   836→        <div className="tw">
+   837→          <table className="ltable">
+   838→            <thead><tr><th>Name</th><th>Email</th><th>Role</th><th>Department</th><th>Designation</th><th>Status</th><th>Action</th></tr></thead>
+   839→            <tbody>
+   840→              {displayEmps.map((u: any) => {
+   841→                const isRemoving = removeConfirm === u.id
+   842→                return (
+   843→                  <tr key={u.id} style={!u.isActive ? { opacity: 0.6 } : {}}>
+   844→                    <td style={{ fontWeight: 600 }}>{u.name}</td>
+   845→                    <td style={{ color: 'var(--t3)', fontSize: 12 }}>{u.email}</td>
+   846→                    <td><span className="badge b-gray" style={{ fontSize: 9 }}>{u.role}</span></td>
+   847→                    <td>{u.department || '—'}</td>
+   848→                    <td style={{ fontSize: 11, color: 'var(--t3)' }}>{u.designation || '—'}</td>
+   849→                    <td><span className={`badge ${u.isActive ? 'b-green' : 'b-red'}`} style={{ fontSize: 9 }}>{u.isActive ? 'Active' : 'Left'}</span></td>
+   850→                    <td>
+   851→                      {u.isActive && u.role !== 'ADMIN' && (
+   852→                        isRemoving ? (
+   853→                          <div style={{ display: 'flex', gap: 4 }}>
+   854→                            <button className="btn btn-red btn-sm" style={{ fontSize: 9, padding: '2px 6px' }}
+   855→                              onClick={() => removeMutation.mutate(u.id)} disabled={removeMutation.isPending}>
+   856→                              {removeMutation.isPending ? '...' : '✓ Confirm'}
+   857→                            </button>
+   858→                            <button className="btn btn-ghost btn-sm" style={{ fontSize: 9, padding: '2px 6px' }}
+   859→                              onClick={() => setRemoveConfirm(null)}>✕</button>
+   860→                          </div>
+   861→                        ) : (
+   862→                          <button style={{ fontSize: 9, padding: '2px 6px', background: 'var(--red-l)', color: 'var(--red)',
+   863→                            border: '1px solid rgba(220,38,38,.3)', borderRadius: 4, cursor: 'pointer', fontWeight: 700 }}
+   864→                            onClick={() => setRemoveConfirm(u.id)}>Remove</button>
+   865→                        )
+   866→                      )}
+   867→                      {!u.isActive && (
+   868→                        <button style={{ fontSize: 9, padding: '2px 6px', background: 'var(--green-l)', color: 'var(--green)',
+   869→                          border: '1px solid rgba(21,128,61,.3)', borderRadius: 4, cursor: 'pointer', fontWeight: 700 }}
+   870→                          onClick={() => reactivateMutation.mutate(u.id)} disabled={reactivateMutation.isPending}>Reactivate</button>
+   871→                      )}
+   872→                    </td>
+   873→                  </tr>
+   874→                )
+   875→              })}
+   876→            </tbody>
+   877→          </table>
+   878→        </div>
+   879→      </div>
+   880→
+   881→      {showAddDialog && (
+   882→        <div className="overlay show" onClick={e => { if (e.target === e.currentTarget) setShowAddDialog(false) }}>
+   883→          <div className="modal modal-md" onClick={e => e.stopPropagation()}>
+   884→            <button className="mx" onClick={() => setShowAddDialog(false)}>✕</button>
+   885→            <div className="mt">Add Employee</div>
+   886→            <div className="ms">Add a new team member to LAXREE</div>
+   887→            <div className="gold-divider" />
+   888→            <div className="form-row fr-2">
+   889→              <div className="fg"><label>Full Name <span style={{ color: 'var(--red)' }}>*</span></label><input className="fi" placeholder="Enter name" value={addForm.name} onChange={e => setAddForm({ ...addForm, name: e.target.value })} /></div>
+   890→              <div className="fg"><label>Email <span style={{ color: 'var(--red)' }}>*</span></label><input className="fi" type="email" placeholder="Enter email" value={addForm.email} onChange={e => setAddForm({ ...addForm, email: e.target.value })} /></div>
+   891→            </div>
+   892→            <div className="form-row fr-2">
+   893→              <div className="fg"><label>Role</label><select className="fi" value={addForm.role} onChange={e => setAddForm({ ...addForm, role: e.target.value })}><option value="EMPLOYEE">Employee</option><option value="MANAGER">Manager</option><option value="EA">EA</option><option value="DIRECTOR">Director</option></select></div>
+   894→              <div className="fg"><label>Department</label><select className="fi" value={addForm.department} onChange={e => setAddForm({ ...addForm, department: e.target.value })}><option value="">Select</option><option value="Sales">Sales</option><option value="Account">Account</option><option value="HR">HR</option><option value="Coordinator">Coordinator</option><option value="Back Office">Back Office</option><option value="Admin">Admin</option><option value="Management">Management</option></select></div>
+   895→            </div>
+   896→            <div className="form-row fr-2">
+   897→              <div className="fg"><label>Designation</label><input className="fi" placeholder="e.g. Sales Executive" value={addForm.designation} onChange={e => setAddForm({ ...addForm, designation: e.target.value })} /></div>
+   898→              <div className="fg"><label>Phone</label><input className="fi" placeholder="Enter phone" value={addForm.phone} onChange={e => setAddForm({ ...addForm, phone: e.target.value })} /></div>
+   899→            </div>
+   900→            <div className="form-actions">
+   901→              <button className="btn btn-ghost" onClick={() => setShowAddDialog(false)}>Cancel</button>
+   902→              <button className="btn btn-gold" onClick={() => addMutation.mutate(addForm)} disabled={addMutation.isPending || !addForm.name || !addForm.email}>{addMutation.isPending ? 'Adding...' : '✓ Add Employee'}</button>
+   903→            </div>
+   904→          </div>
+   905→        </div>
+   906→      )}
+   907→    </div>
+   908→  )
+   909→}
+   910→
+   911→/* ═══════════════════════════════════════════════════════════
+   912→   Projects View
+   913→   ═══════════════════════════════════════════════════════════ */
+   914→function ProjectsView() {
+   915→  const { data, isLoading } = useQuery({ queryKey: ['projects'], queryFn: () => fetch('/api/projects').then(r => r.json()) })
+   916→  if (isLoading) return <div style={{ padding: 40, textAlign: 'center', color: 'var(--t3)' }}>Loading projects…</div>
+   917→  const projects: any[] = Array.isArray(data) ? data : []
+   918→
+   919→  return (
+   920→    <div>
+   921→      <div className="ph"><div className="ph-left"><h2>Projects</h2><p>Project management and tracking</p></div><div className="ph-right"><span className="badge b-gold">{projects.length} Projects</span></div></div>
+   922→      <div className="page-accent" />
+   923→      <div className="mc-grid">
+   924→        {projects.map((p: any) => (
+   925→          <div key={p.id} className="mc">
+   926→            <div className="mc-top"><div><div className="mc-name">{p.name}</div><div className="mc-role">{p.status} · {p.department || '—'}</div></div></div>
+   927→            <div className="mc-stat"><span>Progress</span><span>{p.completionRate || 0}%</span></div>
+   928→          </div>
+   929→        ))}
+   930→        {projects.length === 0 && <div className="empty"><p>No projects yet</p></div>}
+   931→      </div>
+   932→    </div>
+   933→  )
+   934→}
+   935→
+   936→/* ═══════════════════════════════════════════════════════════
+   937→   Reports View
+   938→   ═══════════════════════════════════════════════════════════ */
+   939→function ReportsView() {
+   940→  const { currentUserId } = useWorkflowStore()
+   941→  const { data } = useQuery({ queryKey: ['dashboard', currentUserId], queryFn: () => fetch(`/api/dashboard?userId=${currentUserId}`).then(r => r.json()) })
+   942→  const d = data as any
+   943→
+   944→  return (
+   945→    <div>
+   946→      <div className="ph"><div className="ph-left"><h2>Reports</h2><p>Generated reports and export center</p></div></div>
+   947→      <div className="page-accent" />
+   948→      <div className="stat-grid sg-4" style={{ marginBottom: 16 }}>
+   949→        <div className="sc"><div className="sc-accent" style={{ background: 'var(--g2)' }} /><div className="sc-top"><div><div className="sc-label">Total Tasks</div><div className="sc-val c-gold">{d?.totalTasks || 0}</div></div></div></div>
+   950→        <div className="sc"><div className="sc-accent" style={{ background: 'var(--green)' }} /><div className="sc-top"><div><div className="sc-label">Completed</div><div className="sc-val c-green">{d?.completedTasks || 0}</div></div></div></div>
+   951→        <div className="sc"><div className="sc-accent" style={{ background: 'var(--amber)' }} /><div className="sc-top"><div><div className="sc-label">Pending</div><div className="sc-val c-amber">{d?.pendingTasks || 0}</div></div></div></div>
+   952→        <div className="sc"><div className="sc-accent" style={{ background: 'var(--red)' }} /><div className="sc-top"><div><div className="sc-label">Overdue</div><div className="sc-val c-red">{d?.overdueTasks || 0}</div></div></div></div>
+   953→      </div>
+   954→      <div className="lcard"><div className="cb" style={{ textAlign: 'center', padding: 40, color: 'var(--t3)' }}>Detailed reports coming soon. Use Analytics for live data.</div></div>
+   955→    </div>
+   956→  )
+   957→}
+   958→
+   959→/* ═══════════════════════════════════════════════════════════
+   960→   Scorecards View
+   961→   ═══════════════════════════════════════════════════════════ */
+   962→function ScorecardsView() {
+   963→  const { currentUserId } = useWorkflowStore()
+   964→  const { data } = useQuery({ queryKey: ['dashboard', currentUserId], queryFn: () => fetch(`/api/dashboard?userId=${currentUserId}`).then(r => r.json()) })
+   965→  const d = data as any
+   966→  const userPerf = d?.userPerformance || []
+   967→
+   968→  return (
+   969→    <div>
+   970→      <div className="ph"><div className="ph-left"><h2>Scorecards</h2><p>Employee performance scorecard overview</p></div></div>
+   971→      <div className="page-accent" />
+   972→      <div className="lcard">
+   973→        <div className="ch"><div className="ct">📊 Team Scorecards</div></div>
+   974→        <div className="cb">
+   975→          {userPerf.length === 0 ? <div className="empty"><p>No scorecard data yet</p></div> : (
+   976→            <table className="ltable">
+   977→              <thead><tr><th>Member</th><th>Department</th><th>Tasks</th><th>Done</th><th>Score</th></tr></thead>
+   978→              <tbody>
+   979→                {userPerf.map((u: any) => (
+   980→                  <tr key={u.id}><td style={{ fontWeight: 600 }}>{u.name}</td><td>{u.department || '—'}</td><td>{u.total}</td><td>{u.done}</td><td style={{ fontWeight: 800, color: u.score >= 70 ? 'var(--green)' : u.score >= 40 ? 'var(--amber)' : 'var(--red)' }}>{u.score}</td></tr>
+   981→                ))}
+   982→              </tbody>
+   983→            </table>
+   984→          )}
+   985→        </div>
+   986→      </div>
+   987→    </div>
+   988→  )
+   989→}
+   990→
+   991→/* ═══════════════════════════════════════════════════════════
+   992→   Settings View
+   993→   ═══════════════════════════════════════════════════════════ */
+   994→function SettingsView() {
+   995→  const { currentUser, darkMode, toggleDarkMode } = useWorkflowStore()
+   996→
+   997→  return (
+   998→    <div>
+   999→      <div className="ph"><div className="ph-left"><h2>Settings</h2><p>Application configuration and preferences</p></div></div>
+  1000→      <div className="page-accent" />
+  1001→      <div className="lcard" style={{ marginBottom: 14 }}>
+  1002→        <div className="ch"><div className="ct">👤 Account</div></div>
+  1003→        <div className="cb">
+  1004→          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+  1005→            <div><div style={{ fontSize: 10, color: 'var(--t3)', textTransform: 'uppercase', letterSpacing: 0.6, fontWeight: 800 }}>Name</div><div style={{ fontSize: 13, fontWeight: 700, marginTop: 2 }}>{currentUser?.name || '—'}</div></div>
+  1006→            <div><div style={{ fontSize: 10, color: 'var(--t3)', textTransform: 'uppercase', letterSpacing: 0.6, fontWeight: 800 }}>Role</div><div style={{ fontSize: 13, fontWeight: 700, marginTop: 2 }}>{currentUser?.role || '—'}</div></div>
+  1007→          </div>
+  1008→        </div>
+  1009→      </div>
+  1010→      <div className="lcard" style={{ marginBottom: 14 }}>
+  1011→        <div className="ch"><div className="ct">🎨 Appearance</div></div>
+  1012→        <div className="cb">
+  1013→          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '12px 0', borderBottom: '1px solid var(--b1)' }}>
+  1014→            <div><div style={{ fontSize: 13, fontWeight: 700 }}>Dark Mode</div><div style={{ fontSize: 11, color: 'var(--t3)' }}>Switch between light and dark theme</div></div>
+  1015→            <button className={`dark-toggle ${darkMode ? 'on' : ''}`} onClick={toggleDarkMode} title="Toggle dark mode" />
+  1016→          </div>
+  1017→        </div>
+  1018→      </div>
+  1019→      <div className="lcard">
+  1020→        <div className="ch"><div className="ct">ℹ️ About LAXREE Enterprise Suite</div></div>
+  1021→        <div className="cb">
+  1022→          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+  1023→            <div><div style={{ fontSize: 10, color: 'var(--t3)', textTransform: 'uppercase', letterSpacing: 0.6, fontWeight: 800 }}>Version</div><div style={{ fontSize: 13, fontWeight: 700, marginTop: 2 }}>2.0.0</div></div>
+  1024→            <div><div style={{ fontSize: 10, color: 'var(--t3)', textTransform: 'uppercase', letterSpacing: 0.6, fontWeight: 800 }}>Environment</div><div style={{ fontSize: 13, fontWeight: 700, marginTop: 2 }}>Production</div></div>
+  1025→            <div><div style={{ fontSize: 10, color: 'var(--t3)', textTransform: 'uppercase', letterSpacing: 0.6, fontWeight: 800 }}>License</div><div style={{ fontSize: 13, fontWeight: 700, marginTop: 2 }}>Enterprise</div></div>
+  1026→            <div><div style={{ fontSize: 10, color: 'var(--t3)', textTransform: 'uppercase', letterSpacing: 0.6, fontWeight: 800 }}>Support</div><div style={{ fontSize: 13, fontWeight: 700, marginTop: 2 }}>support@laxree.com</div></div>
+  1027→          </div>
+  1028→        </div>
+  1029→      </div>
+  1030→    </div>
+  1031→  )
+  1032→}
+  1033→
+  1034→/* ═══════════════════════════════════════════════════════════
+  1035→   Main Page Export
+  1036→   ═══════════════════════════════════════════════════════════ */
+  1037→export default function HomePage() {
+  1038→  const { darkMode, currentUser } = useWorkflowStore()
+  1039→
+  1040→  useEffect(() => {
+  1041→    if (typeof document !== 'undefined') {
+  1042→      document.documentElement.classList.toggle('dark', darkMode)
+  1043→    }
+  1044→  }, [darkMode])
+  1045→
+  1046→  // Login gate — show login page if not authenticated
+  1047→  if (!currentUser) {
+  1048→    return <LaxreeLogin />
+  1049→  }
+  1050→
+  1051→  return (
+  1052→    <ErrorBoundary>
+  1053→      <div style={{ background: '#f8fafc', minHeight: '100vh', transition: 'background .3s' }}>
+  1054→        <LaxreeTopbar />
+  1055→        <LaxreeSidebar />
+  1056→        <main className="main-area">
+  1057→          <ActiveView />
+  1058→        </main>
+  1059→        <LaxreeCreateTask />
+  1060→        <LaxreeCommandPalette />
+  1061→        <LaxreeNotifPanel />
+  1062→        <div id="toastArea" />
+  1063→      </div>
+  1064→    </ErrorBoundary>
+  1065→  )
+  1066→}
+  1067→

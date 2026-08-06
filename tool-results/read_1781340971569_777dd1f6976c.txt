@@ -1,0 +1,1073 @@
+     1→'use client'
+     2→
+     3→import { useWorkflowStore } from '@/stores/workflow-store'
+     4→import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+     5→import { useState, useMemo, useCallback } from 'react'
+     6→
+     7→/* ═══════════════════════════════════════════════════════════
+     8→   UTILITY FUNCTIONS
+     9→   ═══════════════════════════════════════════════════════════ */
+    10→
+    11→// Get ISO week number from date
+    12→function getWeekNumber(date: Date): number {
+    13→  const d = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()))
+    14→  const dayNum = d.getUTCDay() || 7
+    15→  d.setUTCDate(d.getUTCDate() + 4 - dayNum)
+    16→  const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1))
+    17→  return Math.ceil((((d.getTime() - yearStart.getTime()) / 86400000) + 1) / 7)
+    18→}
+    19→
+    20→// Get Monday of the week containing the date
+    21→function getMonday(date: Date): Date {
+    22→  const d = new Date(date)
+    23→  const day = d.getDay()
+    24→  const diff = d.getDate() - day + (day === 0 ? -6 : 1)
+    25→  return new Date(d.setDate(diff))
+    26→}
+    27→
+    28→// Get Sunday of the week
+    29→function getSunday(date: Date): Date {
+    30→  const monday = getMonday(date)
+    31→  return new Date(monday.getTime() + 6 * 24 * 60 * 60 * 1000)
+    32→}
+    33→
+    34→// Format date as DD/MM/YYYY
+    35→function formatDate(date: Date): string {
+    36→  const d = new Date(date)
+    37→  return `${d.getDate()}/${d.getMonth() + 1}/${d.getFullYear()}`
+    38→}
+    39→
+    40→// Calculate PR (Performance Rating) from scores
+    41→function calculatePR(actualGreen: number, actualYellow: number, actualRed: number): number {
+    42→  const total = actualGreen + actualYellow + actualRed
+    43→  if (total === 0) return 0
+    44→  const score = (actualGreen * 10 + actualYellow * 5) / (total * 10 / 100)
+    45→  return Math.round(score * 10) / 10
+    46→}
+    47→
+    48→// Get score color class
+    49→function scoreColor(value: number): string {
+    50→  if (value >= 70) return 'var(--green)'
+    51→  if (value >= 40) return 'var(--amber)'
+    52→  return 'var(--red)'
+    53→}
+    54→
+    55→function scoreBg(value: number): string {
+    56→  if (value >= 70) return 'var(--green-l)'
+    57→  if (value >= 40) return 'var(--amber-l)'
+    58→  return 'var(--red-l)'
+    59→}
+    60→
+    61→/* ═══════════════════════════════════════════════════════════
+    62→   TYPES
+    63→   ═══════════════════════════════════════════════════════════ */
+    64→
+    65→interface ScorecardData {
+    66→  id: string
+    67→  userId: string
+    68→  weekStartDate: string
+    69→  weekEndDate: string
+    70→  weekNumber: number
+    71→  year: number
+    72→  planRedScore: number
+    73→  planYellowScore: number
+    74→  planGreenScore: number
+    75→  actualRedScore: number
+    76→  actualYellowScore: number
+    77→  actualGreenScore: number
+    78→  nextRedScore: number
+    79→  nextYellowScore: number
+    80→  nextGreenScore: number
+    81→  prScore: number
+    82→  commitments: string | null
+    83→  notes: string | null
+    84→  createdAt: string
+    85→  updatedAt: string
+    86→  user: {
+    87→    id: string
+    88→    name: string
+    89→    department: string | null
+    90→    designation: string | null
+    91→    phone: string | null
+    92→  }
+    93→}
+    94→
+    95→interface WeeklyScoreData {
+    96→  totalTasks: number
+    97→  completedOnTime: number
+    98→  completedLate: number
+    99→  inProgressOnTrack: number
+   100→  overdue: number
+   101→  pending: number
+   102→  rejected: number
+   103→  greenScore: number
+   104→  yellowScore: number
+   105→  redScore: number
+   106→  prScore: number
+   107→}
+   108→
+   109→interface PlanFormData {
+   110→  planRedScore: number
+   111→  planYellowScore: number
+   112→  planGreenScore: number
+   113→  nextRedScore: number
+   114→  nextYellowScore: number
+   115→  nextGreenScore: number
+   116→  commitments: string
+   117→  notes: string
+   118→}
+   119→
+   120→const emptyPlanForm: PlanFormData = {
+   121→  planRedScore: 0, planYellowScore: 0, planGreenScore: 0,
+   122→  nextRedScore: 0, nextYellowScore: 0, nextGreenScore: 0,
+   123→  commitments: '',
+   124→  notes: '',
+   125→}
+   126→
+   127→/* ═══════════════════════════════════════════════════════════
+   128→   LIVE BADGE COMPONENT
+   129→   ═══════════════════════════════════════════════════════════ */
+   130→
+   131→function LiveBadge({ isLive }: { isLive: boolean }) {
+   132→  if (!isLive) return null
+   133→  return (
+   134→    <span style={{
+   135→      display: 'inline-flex',
+   136→      alignItems: 'center',
+   137→      gap: 3,
+   138→      marginLeft: 6,
+   139→      padding: '1px 6px',
+   140→      borderRadius: 4,
+   141→      background: '#059669',
+   142→      color: '#fff',
+   143→      fontSize: 8,
+   144→      fontWeight: 800,
+   145→      textTransform: 'uppercase',
+   146→      letterSpacing: 0.5,
+   147→      lineHeight: '14px',
+   148→      verticalAlign: 'middle',
+   149→      animation: 'livePulse 2s ease-in-out infinite',
+   150→    }}>
+   151→      <span style={{
+   152→        width: 5,
+   153→        height: 5,
+   154→        borderRadius: '50%',
+   155→        background: '#4ADE80',
+   156→        display: 'inline-block',
+   157→      }} />
+   158→      LIVE
+   159→    </span>
+   160→  )
+   161→}
+   162→
+   163→/* ═══════════════════════════════════════════════════════════
+   164→   MAIN COMPONENT
+   165→   ═══════════════════════════════════════════════════════════ */
+   166→
+   167→export function LaxreeMonday() {
+   168→  const { addToast } = useWorkflowStore()
+   169→  const qc = useQueryClient()
+   170→
+   171→  // State
+   172→  const [selectedUserId, setSelectedUserId] = useState<string>('')
+   173→  const [weekOffset, setWeekOffset] = useState(0)
+   174→  const [saving, setSaving] = useState(false)
+   175→
+   176→  // Plan form data (This Week Plan, Next Week Plan, commitments, notes)
+   177→  const [planForm, setPlanForm] = useState<PlanFormData>({ ...emptyPlanForm })
+   178→
+   179→  // Computed week info
+   180→  const weekInfo = useMemo(() => {
+   181→    const now = new Date()
+   182→    const targetDate = new Date(now.getTime() + weekOffset * 7 * 24 * 60 * 60 * 1000)
+   183→    const monday = getMonday(targetDate)
+   184→    const sunday = getSunday(targetDate)
+   185→    const weekNum = getWeekNumber(targetDate)
+   186→    const year = targetDate.getFullYear()
+   187→    return { monday, sunday, weekNum, year, targetDate }
+   188→  }, [weekOffset])
+   189→
+   190→  // Fetch users (employees only - no directors)
+   191→  const { data: usersData = [] } = useQuery({
+   192→    queryKey: ['users-monday'],
+   193→    queryFn: () => fetch('/api/users').then(r => r.json()),
+   194→  })
+   195→  const users: any[] = Array.isArray(usersData) ? usersData : []
+   196→
+   197→  // Filter users: employees, managers, EA, admin - exclude directors
+   198→  const doers = users.filter((u: any) => u.role !== 'DIRECTOR' && u.isActive)
+   199→
+   200→  // Fetch scorecards for selected user
+   201→  const { data: scorecardsData = [], isLoading: scorecardsLoading } = useQuery({
+   202→    queryKey: ['monday-meeting', selectedUserId],
+   203→    queryFn: () => selectedUserId
+   204→      ? fetch(`/api/monday-meeting?userId=${selectedUserId}`).then(r => r.json())
+   205→      : Promise.resolve([]),
+   206→    enabled: !!selectedUserId,
+   207→  })
+   208→  const scorecards: ScorecardData[] = Array.isArray(scorecardsData) ? scorecardsData : []
+   209→
+   210→  // Find current week scorecard
+   211→  const currentWeekScorecard = useMemo(() => {
+   212→    return scorecards.find((s: ScorecardData) =>
+   213→      s.weekNumber === weekInfo.weekNum && s.year === weekInfo.year
+   214→    )
+   215→  }, [scorecards, weekInfo])
+   216→
+   217→  // Find PREVIOUS week scorecard (to auto-populate This Week Score from their Next Week Plan commitments)
+   218→  const prevWeekScorecard = useMemo(() => {
+   219→    const prevWeekOffset = new Date(weekInfo.monday.getTime() - 7 * 24 * 60 * 60 * 1000)
+   220→    const prevWeekNum = getWeekNumber(prevWeekOffset)
+   221→    const prevYear = prevWeekOffset.getFullYear()
+   222→    return scorecards.find((s: ScorecardData) =>
+   223→      s.weekNumber === prevWeekNum && s.year === prevYear
+   224→    )
+   225→  }, [scorecards, weekInfo])
+   226→
+   227→  // Fetch LIVE weekly score data for the selected user + week
+   228→  const { data: weeklyScoreData, isLoading: weeklyScoreLoading } = useQuery({
+   229→    queryKey: ['weekly-score', selectedUserId, weekInfo.weekNum, weekInfo.year],
+   230→    queryFn: () => fetch(
+   231→      `/api/weekly-score?userId=${selectedUserId}&weekStart=${weekInfo.monday.toISOString()}&weekEnd=${weekInfo.sunday.toISOString()}`
+   232→    ).then(r => r.json()),
+   233→    enabled: !!selectedUserId,
+   234→  })
+   235→  const weeklyScore: WeeklyScoreData | null = weeklyScoreData && !(weeklyScoreData as any).error ? weeklyScoreData as WeeklyScoreData : null
+   236→
+   237→  // Load plan form when scorecard changes
+   238→  // "This Week Score" auto-populates from previous week's "Next Week Plan" commitments
+   239→  const currentPlanForm = useMemo(() => {
+   240→    const sc = currentWeekScorecard
+   241→    if (sc) {
+   242→      return {
+   243→        planRedScore: sc.planRedScore || 0,
+   244→        planYellowScore: sc.planYellowScore || 0,
+   245→        planGreenScore: sc.planGreenScore || 0,
+   246→        nextRedScore: sc.nextRedScore || 0,
+   247→        nextYellowScore: sc.nextYellowScore || 0,
+   248→        nextGreenScore: sc.nextGreenScore || 0,
+   249→        commitments: sc.commitments || '',
+   250→        notes: sc.notes || '',
+   251→      }
+   252→    }
+   253→    // No scorecard for this week yet — auto-populate from previous week's Next Week Plan
+   254→    if (prevWeekScorecard) {
+   255→      return {
+   256→        planRedScore: prevWeekScorecard.nextRedScore || 0,
+   257→        planYellowScore: prevWeekScorecard.nextYellowScore || 0,
+   258→        planGreenScore: prevWeekScorecard.nextGreenScore || 0,
+   259→        nextRedScore: 0,
+   260→        nextYellowScore: 0,
+   261→        nextGreenScore: 0,
+   262→        commitments: prevWeekScorecard.commitments || '',
+   263→        notes: '',
+   264→      }
+   265→    }
+   266→    return { ...emptyPlanForm }
+   267→  }, [currentWeekScorecard, prevWeekScorecard])
+   268→
+   269→  // Merge: if user hasn't edited planForm yet, use scorecard data
+   270→  const activePlanForm = useMemo(() => {
+   271→    // Always use currentPlanForm when scorecard exists (fresh load)
+   272→    // But once user edits, planForm takes precedence
+   273→    // We track this by checking if planForm was ever changed from empty
+   274→    return planForm
+   275→  }, [planForm])
+   276→
+   277→  // Compute Past Week Score: auto-calculated from live performance data (READ-ONLY)
+   278→  const pastWeekScores = useMemo(() => {
+   279→    // If we have live weekly score data, use it
+   280→    if (weeklyScore && weeklyScore.totalTasks > 0) {
+   281→      return {
+   282→        red: weeklyScore.redScore || 0,
+   283→        yellow: weeklyScore.yellowScore || 0,
+   284→        green: weeklyScore.greenScore || 0,
+   285→      }
+   286→    }
+   287→    // Fallback to scorecard saved data
+   288→    if (currentWeekScorecard) {
+   289→      return {
+   290→        red: currentWeekScorecard.actualRedScore || 0,
+   291→        yellow: currentWeekScorecard.actualYellowScore || 0,
+   292→        green: currentWeekScorecard.actualGreenScore || 0,
+   293→      }
+   294→    }
+   295→    return { red: 0, yellow: 0, green: 0 }
+   296→  }, [weeklyScore, currentWeekScorecard])
+   297→
+   298→  // Whether past week scores are showing LIVE (auto-calculated) values
+   299→  const isLiveScore = useMemo(() => {
+   300→    return !!weeklyScore && weeklyScore.totalTasks > 0
+   301→  }, [weeklyScore])
+   302→
+   303→  // Auto-calculate PR from past week scores (read-only)
+   304→  const autoPR = useMemo(() => {
+   305→    if (weeklyScore && weeklyScore.totalTasks > 0) {
+   306→      return weeklyScore.prScore
+   307→    }
+   308→    return calculatePR(pastWeekScores.green, pastWeekScores.yellow, pastWeekScores.red)
+   309→  }, [weeklyScore, pastWeekScores])
+   310→
+   311→  // Live score detail summary for info banner
+   312→  const liveScoreDetail = useMemo(() => {
+   313→    if (!weeklyScore || weeklyScore.totalTasks === 0) return null
+   314→    return {
+   315→      total: weeklyScore.totalTasks,
+   316→      green: weeklyScore.completedOnTime,
+   317→      yellow: weeklyScore.inProgressOnTrack + weeklyScore.completedLate,
+   318→      red: weeklyScore.overdue + weeklyScore.rejected,
+   319→    }
+   320→  }, [weeklyScore])
+   321→
+   322→  // Reset form when user or week changes
+   323→  const handleUserChange = useCallback((userId: string) => {
+   324→    setSelectedUserId(userId)
+   325→    setPlanForm({ ...emptyPlanForm })
+   326→  }, [])
+   327→
+   328→  const handleWeekChange = useCallback((newOffset: number) => {
+   329→    setWeekOffset(newOffset)
+   330→    setPlanForm({ ...emptyPlanForm })
+   331→  }, [])
+   332→
+   333→  // Update plan form field
+   334→  const updatePlanField = (field: keyof PlanFormData, value: any) => {
+   335→    setPlanForm(prev => ({ ...prev, [field]: value }))
+   336→  }
+   337→
+   338→  // Save mutation
+   339→  const saveMutation = useMutation({
+   340→    mutationFn: async () => {
+   341→      setSaving(true)
+   342→      const prScore = autoPR || calculatePR(pastWeekScores.green, pastWeekScores.yellow, pastWeekScores.red)
+   343→      // Use currentPlanForm for data that comes from scorecard, planForm for user edits
+   344→      const savePlanForm = { ...currentPlanForm, ...planForm }
+   345→      const res = await fetch('/api/monday-meeting', {
+   346→        method: 'POST',
+   347→        headers: { 'Content-Type': 'application/json' },
+   348→        body: JSON.stringify({
+   349→          userId: selectedUserId,
+   350→          weekStartDate: weekInfo.monday.toISOString(),
+   351→          weekEndDate: weekInfo.sunday.toISOString(),
+   352→          weekNumber: weekInfo.weekNum,
+   353→          year: weekInfo.year,
+   354→          planRedScore: savePlanForm.planRedScore,
+   355→          planYellowScore: savePlanForm.planYellowScore,
+   356→          planGreenScore: savePlanForm.planGreenScore,
+   357→          actualRedScore: pastWeekScores.red,
+   358→          actualYellowScore: pastWeekScores.yellow,
+   359→          actualGreenScore: pastWeekScores.green,
+   360→          nextRedScore: savePlanForm.nextRedScore,
+   361→          nextYellowScore: savePlanForm.nextYellowScore,
+   362→          nextGreenScore: savePlanForm.nextGreenScore,
+   363→          prScore,
+   364→          commitments: savePlanForm.commitments,
+   365→          notes: savePlanForm.notes,
+   366→        }),
+   367→      })
+   368→      const data = await res.json()
+   369→      if (!res.ok) throw new Error(data.error || 'Save failed')
+   370→      return data
+   371→    },
+   372→    onSuccess: () => {
+   373→      qc.invalidateQueries({ queryKey: ['monday-meeting', selectedUserId] })
+   374→      addToast('ok', `Scorecard saved for ${weekInfo.weekNum} - Week ${weekInfo.year}`)
+   375→      setSaving(false)
+   376→    },
+   377→    onError: (err: any) => {
+   378→      addToast('err', `Save failed: ${err.message}`)
+   379→      setSaving(false)
+   380→    },
+   381→  })
+   382→
+   383→  // Delete mutation
+   384→  const deleteMutation = useMutation({
+   385→    mutationFn: async (id: string) => {
+   386→      await fetch(`/api/monday-meeting?id=${id}`, { method: 'DELETE' })
+   387→    },
+   388→    onSuccess: () => {
+   389→      qc.invalidateQueries({ queryKey: ['monday-meeting', selectedUserId] })
+   390→      addToast('info', 'Scorecard deleted')
+   391→    },
+   392→  })
+   393→
+   394→  // Get past week scorecards for the selected user
+   395→  const pastWeeks = scorecards
+   396→    .filter((s: ScorecardData) => !(s.weekNumber === weekInfo.weekNum && s.year === weekInfo.year))
+   397→    .slice(0, 8)
+   398→
+   399→  const selectedUser = doers.find((u: any) => u.id === selectedUserId)
+   400→
+   401→  // Helper to get the effective plan form value (merges scorecard data with local edits)
+   402→  const getPlanValue = (field: keyof PlanFormData) => {
+   403→    // If user has made edits (planForm differs from initial), use planForm
+   404→    // Otherwise use currentPlanForm (from scorecard)
+   405→    return planForm[field] !== emptyPlanForm[field] || currentWeekScorecard
+   406→      ? (currentWeekScorecard && planForm[field] === emptyPlanForm[field] ? currentPlanForm[field] : planForm[field])
+   407→      : planForm[field]
+   408→  }
+   409→
+   410→  // Simpler approach: merge currentPlanForm with user edits
+   411→  // If currentWeekScorecard exists and user hasn't changed field, use scorecard value
+   412→  // Otherwise use planForm value
+   413→  const mergedPlanForm = useMemo(() => {
+   414→    if (!currentWeekScorecard) return planForm
+   415→    // If planForm is still empty (user hasn't typed anything), use scorecard data
+   416→    const hasUserEdits = Object.keys(planForm).some(key => {
+   417→      const k = key as keyof PlanFormData
+   418→      return planForm[k] !== emptyPlanForm[k]
+   419→    })
+   420→    if (!hasUserEdits) return currentPlanForm
+   421→    // Merge: user edits override scorecard data
+   422→    return { ...currentPlanForm, ...planForm }
+   423→  }, [currentPlanForm, planForm, currentWeekScorecard])
+   424→
+   425→  return (
+   426→    <div>
+   427→      {/* Live pulse animation style */}
+   428→      <style>{`
+   429→        @keyframes livePulse {
+   430→          0%, 100% { opacity: 1; }
+   431→          50% { opacity: 0.7; }
+   432→        }
+   433→      `}</style>
+   434→
+   435→      {/* Page Header */}
+   436→      <div className="ph">
+   437→        <div className="ph-left">
+   438→          <h2>Monday Meeting</h2>
+   439→          <p>Weekly performance scorecard &amp; commitment tracker</p>
+   440→        </div>
+   441→        <div className="ph-right">
+   442→          <span className="badge b-gold">Week {weekInfo.weekNum}</span>
+   443→        </div>
+   444→      </div>
+   445→      <div className="page-accent" />
+   446→
+   447→      {/* Top Controls: User Selection + Week Navigation */}
+   448→      <div className="lcard" style={{ marginBottom: 14 }}>
+   449→        <div className="cb" style={{ padding: '14px 18px' }}>
+   450→          <div style={{ display: 'flex', gap: 14, alignItems: 'center', flexWrap: 'wrap' }}>
+   451→            {/* Doer Name Selector */}
+   452→            <div style={{ flex: '1 1 260px', minWidth: 200 }}>
+   453→              <label style={{ fontSize: 10, fontWeight: 800, textTransform: 'uppercase', letterSpacing: 0.8, color: 'var(--t3)', marginBottom: 5, display: 'block' }}>
+   454→                Select Doer Name
+   455→              </label>
+   456→              <select
+   457→                className="fi"
+   458→                value={selectedUserId}
+   459→                onChange={e => handleUserChange(e.target.value)}
+   460→                style={{ fontWeight: 700, fontSize: 14 }}
+   461→              >
+   462→                <option value="">-- Select Team Member --</option>
+   463→                {doers.map((u: any) => (
+   464→                  <option key={u.id} value={u.id}>
+   465→                    {u.name} {u.phone ? `- ${u.phone.slice(-4)}` : ''} ({u.department || 'No Dept'})
+   466→                  </option>
+   467→                ))}
+   468→              </select>
+   469→            </div>
+   470→
+   471→            {/* Week Navigation */}
+   472→            <div style={{ flex: '0 0 auto', display: 'flex', alignItems: 'center', gap: 8 }}>
+   473→              <button className="btn btn-ghost btn-sm" onClick={() => handleWeekChange(weekOffset - 1)}>
+   474→                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M15 18l-6-6 6-6" /></svg>
+   475→                Prev
+   476→              </button>
+   477→              <div style={{ textAlign: 'center', minWidth: 180 }}>
+   478→                <div style={{ fontSize: 14, fontWeight: 800, color: 'var(--t1)' }}>
+   479→                  Week {weekInfo.weekNum}
+   480→                </div>
+   481→                <div style={{ fontSize: 11, color: 'var(--t3)' }}>
+   482→                  {formatDate(weekInfo.monday)} — {formatDate(weekInfo.sunday)}
+   483→                </div>
+   484→              </div>
+   485→              <button className="btn btn-ghost btn-sm" onClick={() => handleWeekChange(Math.min(weekOffset + 1, 0))}>
+   486→                Next
+   487→                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M9 18l6-6-6-6" /></svg>
+   488→              </button>
+   489→              {weekOffset !== 0 && (
+   490→                <button className="btn btn-xs btn-out" onClick={() => handleWeekChange(0)}>
+   491→                  Current Week
+   492→                </button>
+   493→              )}
+   494→            </div>
+   495→
+   496→            {/* PR Score Badge */}
+   497→            {selectedUserId && (
+   498→              <div style={{
+   499→                flex: '0 0 auto',
+   500→                padding: '10px 18px',
+   501→                borderRadius: 'var(--r)',
+   502→                background: autoPR >= 70 ? 'var(--green-l)' : autoPR >= 40 ? 'var(--amber-l)' : autoPR > 0 ? 'var(--red-l)' : 'var(--bg2)',
+   503→                border: `1.5px solid ${autoPR >= 70 ? 'var(--green)' : autoPR >= 40 ? 'var(--amber)' : autoPR > 0 ? 'var(--red)' : 'var(--b2)'}`,
+   504→                textAlign: 'center',
+   505→              }}>
+   506→                <div style={{ fontSize: 9, fontWeight: 800, textTransform: 'uppercase', letterSpacing: 1, color: 'var(--t3)' }}>PR Score</div>
+   507→                <div style={{ fontSize: 26, fontWeight: 800, color: autoPR >= 70 ? 'var(--green)' : autoPR >= 40 ? 'var(--amber)' : autoPR > 0 ? 'var(--red)' : 'var(--t3)', lineHeight: 1.1 }}>
+   508→                  {autoPR > 0 ? autoPR : '—'}
+   509→                </div>
+   510→              </div>
+   511→            )}
+   512→          </div>
+   513→        </div>
+   514→      </div>
+   515→
+   516→      {!selectedUserId ? (
+   517→        /* Empty State */
+   518→        <div className="lcard">
+   519→          <div className="cb" style={{ textAlign: 'center', padding: 60 }}>
+   520→            <div style={{ fontSize: 48, marginBottom: 12 }}>📋</div>
+   521→            <div style={{ fontSize: 18, fontWeight: 700, color: 'var(--t1)', marginBottom: 6 }}>Select a Team Member</div>
+   522→            <div style={{ fontSize: 13, color: 'var(--t3)' }}>Choose a doer name above to view or create their weekly scorecard</div>
+   523→          </div>
+   524→        </div>
+   525→      ) : (
+   526→        <>
+   527→          {/* Scorecard Grid — Matching the uploaded image */}
+   528→          <div className="lcard" style={{ marginBottom: 14 }}>
+   529→            <div className="ch">
+   530→              <div className="ct">
+   531→                <span style={{ fontSize: 16, marginRight: 6 }}>📝</span>
+   532→                Weekly Scorecard — {selectedUser?.name}
+   533→              </div>
+   534→              <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+   535→                <span className="badge b-gold">Week {weekInfo.weekNum}</span>
+   536→                <span style={{ fontSize: 11, color: 'var(--t3)' }}>{formatDate(weekInfo.monday)} — {formatDate(weekInfo.sunday)}</span>
+   537→                {weeklyScoreLoading && (
+   538→                  <span style={{ fontSize: 10, color: 'var(--t3)', display: 'flex', alignItems: 'center', gap: 4 }}>
+   539→                    <span style={{ animation: 'livePulse 1s ease-in-out infinite' }}>⏳</span> Loading scores...
+   540→                  </span>
+   541→                )}
+   542→              </div>
+   543→            </div>
+   544→            <div className="cb" style={{ padding: '10px 14px 18px' }}>
+   545→              {/* Live Score Summary Banner */}
+   546→              {liveScoreDetail && (
+   547→                <div style={{
+   548→                  marginBottom: 12,
+   549→                  padding: '8px 14px',
+   550→                  background: isLiveScore ? 'linear-gradient(135deg, #F0FDF4, #ECFDF5)' : 'var(--bg)',
+   551→                  border: `1.5px solid ${isLiveScore ? '#86EFAC' : 'var(--b1)'}`,
+   552→                  borderRadius: 'var(--r-sm)',
+   553→                  display: 'flex',
+   554→                  alignItems: 'center',
+   555→                  gap: 12,
+   556→                  flexWrap: 'wrap',
+   557→                }}>
+   558→                  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+   559→                    <LiveBadge isLive={isLiveScore} />
+   560→                    <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--t2)' }}>
+   561→                      Auto-calculated from {liveScoreDetail.total} task{liveScoreDetail.total !== 1 ? 's' : ''}
+   562→                    </span>
+   563→                  </div>
+   564→                  <div style={{ display: 'flex', gap: 10, fontSize: 10, fontWeight: 700 }}>
+   565→                    <span style={{ color: '#22C55E' }}>✓ On time: {liveScoreDetail.green}</span>
+   566→                    <span style={{ color: '#F59E0B' }}>◐ In progress/Late: {liveScoreDetail.yellow}</span>
+   567→                    <span style={{ color: '#EF4444' }}>✕ Overdue/Rejected: {liveScoreDetail.red}</span>
+   568→                  </div>
+   569→                </div>
+   570→              )}
+   571→
+   572→              {/* Scorecard Table — Image-matching layout */}
+   573→              <div style={{ overflowX: 'auto' }}>
+   574→                <table style={{
+   575→                  width: '100%',
+   576→                  borderCollapse: 'collapse',
+   577→                  fontFamily: "'DM Sans', sans-serif",
+   578→                  fontSize: 13,
+   579→                }}>
+   580→                  <thead>
+   581→                    <tr>
+   582→                      <th style={{
+   583→                        padding: '10px 14px',
+   584→                        textAlign: 'left',
+   585→                        fontSize: 10,
+   586→                        fontWeight: 800,
+   587→                        textTransform: 'uppercase',
+   588→                        letterSpacing: 0.8,
+   589→                        color: 'var(--t3)',
+   590→                        borderBottom: '2px solid var(--b1)',
+   591→                        width: 160,
+   592→                      }}>
+   593→                        Category
+   594→                      </th>
+   595→                      <th style={{
+   596→                        padding: '10px 14px',
+   597→                        textAlign: 'center',
+   598→                        fontSize: 10,
+   599→                        fontWeight: 800,
+   600→                        textTransform: 'uppercase',
+   601→                        letterSpacing: 0.8,
+   602→                        color: '#DC2626',
+   603→                        borderBottom: '2px solid #FEE2E2',
+   604→                        background: '#FEF2F2',
+   605→                        minWidth: 120,
+   606→                      }}>
+   607→                        🔴 Red Score
+   608→                      </th>
+   609→                      <th style={{
+   610→                        padding: '10px 14px',
+   611→                        textAlign: 'center',
+   612→                        fontSize: 10,
+   613→                        fontWeight: 800,
+   614→                        textTransform: 'uppercase',
+   615→                        letterSpacing: 0.8,
+   616→                        color: '#D97706',
+   617→                        borderBottom: '2px solid #FEF3C7',
+   618→                        background: '#FFFBEB',
+   619→                        minWidth: 120,
+   620→                      }}>
+   621→                        🟡 Yellow Score
+   622→                      </th>
+   623→                      <th style={{
+   624→                        padding: '10px 14px',
+   625→                        textAlign: 'center',
+   626→                        fontSize: 10,
+   627→                        fontWeight: 800,
+   628→                        textTransform: 'uppercase',
+   629→                        letterSpacing: 0.8,
+   630→                        color: '#15803D',
+   631→                        borderBottom: '2px solid #DCFCE7',
+   632→                        background: '#F0FDF4',
+   633→                        minWidth: 120,
+   634→                      }}>
+   635→                        🟢 Green Score
+   636→                      </th>
+   637→                    </tr>
+   638→                  </thead>
+   639→                  <tbody>
+   640→                    {/* This Week Score Row — what employee committed in previous Monday meeting */}
+   641→                    <tr>
+   642→                      <td style={{
+   643→                        padding: '10px 14px',
+   644→                        fontWeight: 700,
+   645→                        borderBottom: '1px solid var(--b1)',
+   646→                        color: 'var(--t1)',
+   647→                      }}>
+   648→                        🎯 This Week Score
+   649→                        {prevWeekScorecard && !currentWeekScorecard && (
+   650→                          <span style={{
+   651→                            fontSize: 8,
+   652→                            fontWeight: 700,
+   653→                            color: '#2563EB',
+   654→                            background: '#EFF6FF',
+   655→                            padding: '1px 5px',
+   656→                            borderRadius: 3,
+   657→                            textTransform: 'uppercase',
+   658→                            letterSpacing: 0.5,
+   659→                            marginLeft: 4,
+   660→                          }}>
+   661→                            From last week
+   662→                          </span>
+   663→                        )}
+   664→                      </td>
+   665→                      <td style={{ padding: '8px 14px', borderBottom: '1px solid var(--b1)', textAlign: 'center', background: '#FEF2F288' }}>
+   666→                        <input
+   667→                          type="number"
+   668→                          min={0}
+   669→                          max={100}
+   670→                          value={mergedPlanForm.planRedScore}
+   671→                          onChange={e => updatePlanField('planRedScore', Number(e.target.value))}
+   672→                          style={{
+   673→                            width: 80, textAlign: 'center', padding: '6px 8px',
+   674→                            border: '1.5px solid #FCA5A5', borderRadius: 6,
+   675→                            fontSize: 13, fontWeight: 700, color: '#DC2626',
+   676→                            background: '#FFF', fontFamily: "'DM Sans', sans-serif",
+   677→                          }}
+   678→                        />
+   679→                        <span style={{ fontSize: 10, color: 'var(--t3)', marginLeft: 4 }}>%</span>
+   680→                      </td>
+   681→                      <td style={{ padding: '8px 14px', borderBottom: '1px solid var(--b1)', textAlign: 'center', background: '#FFFBEB88' }}>
+   682→                        <input
+   683→                          type="number"
+   684→                          min={0}
+   685→                          max={100}
+   686→                          value={mergedPlanForm.planYellowScore}
+   687→                          onChange={e => updatePlanField('planYellowScore', Number(e.target.value))}
+   688→                          style={{
+   689→                            width: 80, textAlign: 'center', padding: '6px 8px',
+   690→                            border: '1.5px solid #FCD34D', borderRadius: 6,
+   691→                            fontSize: 13, fontWeight: 700, color: '#D97706',
+   692→                            background: '#FFF', fontFamily: "'DM Sans', sans-serif",
+   693→                          }}
+   694→                        />
+   695→                        <span style={{ fontSize: 10, color: 'var(--t3)', marginLeft: 4 }}>%</span>
+   696→                      </td>
+   697→                      <td style={{ padding: '8px 14px', borderBottom: '1px solid var(--b1)', textAlign: 'center', background: '#F0FDF488' }}>
+   698→                        <input
+   699→                          type="number"
+   700→                          min={0}
+   701→                          max={100}
+   702→                          value={mergedPlanForm.planGreenScore}
+   703→                          onChange={e => updatePlanField('planGreenScore', Number(e.target.value))}
+   704→                          style={{
+   705→                            width: 80, textAlign: 'center', padding: '6px 8px',
+   706→                            border: '1.5px solid #86EFAC', borderRadius: 6,
+   707→                            fontSize: 13, fontWeight: 700, color: '#15803D',
+   708→                            background: '#FFF', fontFamily: "'DM Sans', sans-serif",
+   709→                          }}
+   710→                        />
+   711→                        <span style={{ fontSize: 10, color: 'var(--t3)', marginLeft: 4 }}>%</span>
+   712→                      </td>
+   713→                    </tr>
+   714→
+   715→                    {/* Past Week Score Row — READ-ONLY, auto-calculated from live data */}
+   716→                    <tr style={{
+   717→                      background: isLiveScore ? 'linear-gradient(90deg, rgba(34,197,94,0.04), transparent)' : undefined,
+   718→                    }}>
+   719→                      <td style={{
+   720→                        padding: '10px 14px',
+   721→                        fontWeight: 700,
+   722→                        borderBottom: '1px solid var(--b1)',
+   723→                        color: 'var(--t1)',
+   724→                        display: 'flex',
+   725→                        alignItems: 'center',
+   726→                        gap: 4,
+   727→                      }}>
+   728→                        ✅ Past Week Score
+   729→                        <LiveBadge isLive={isLiveScore} />
+   730→                        <span style={{
+   731→                          fontSize: 8,
+   732→                          fontWeight: 700,
+   733→                          color: '#6B7280',
+   734→                          background: '#F3F4F6',
+   735→                          padding: '1px 5px',
+   736→                          borderRadius: 3,
+   737→                          textTransform: 'uppercase',
+   738→                          letterSpacing: 0.5,
+   739→                          marginLeft: 2,
+   740→                        }}>
+   741→                          Read-only
+   742→                        </span>
+   743→                      </td>
+   744→                      <td style={{ padding: '8px 14px', borderBottom: '1px solid var(--b1)', textAlign: 'center', background: '#FEF2F288' }}>
+   745→                        <span style={{
+   746→                          display: 'inline-block', width: 80, textAlign: 'center', padding: '6px 8px',
+   747→                          border: isLiveScore ? '1.5px solid #22C55E' : '1.5px solid #FCA5A5',
+   748→                          borderRadius: 6, fontSize: 13, fontWeight: 700, color: '#DC2626',
+   749→                          background: isLiveScore ? '#F0FDF4' : '#FAFAFA',
+   750→                          fontFamily: "'DM Sans', sans-serif",
+   751→                          boxShadow: isLiveScore ? '0 0 0 2px rgba(34,197,94,0.15)' : 'none',
+   752→                        }}>
+   753→                          {pastWeekScores.red}
+   754→                        </span>
+   755→                        <span style={{ fontSize: 10, color: 'var(--t3)', marginLeft: 4 }}>%</span>
+   756→                      </td>
+   757→                      <td style={{ padding: '8px 14px', borderBottom: '1px solid var(--b1)', textAlign: 'center', background: '#FFFBEB88' }}>
+   758→                        <span style={{
+   759→                          display: 'inline-block', width: 80, textAlign: 'center', padding: '6px 8px',
+   760→                          border: isLiveScore ? '1.5px solid #22C55E' : '1.5px solid #FCD34D',
+   761→                          borderRadius: 6, fontSize: 13, fontWeight: 700, color: '#D97706',
+   762→                          background: isLiveScore ? '#F0FDF4' : '#FAFAFA',
+   763→                          fontFamily: "'DM Sans', sans-serif",
+   764→                          boxShadow: isLiveScore ? '0 0 0 2px rgba(34,197,94,0.15)' : 'none',
+   765→                        }}>
+   766→                          {pastWeekScores.yellow}
+   767→                        </span>
+   768→                        <span style={{ fontSize: 10, color: 'var(--t3)', marginLeft: 4 }}>%</span>
+   769→                      </td>
+   770→                      <td style={{ padding: '8px 14px', borderBottom: '1px solid var(--b1)', textAlign: 'center', background: '#F0FDF488' }}>
+   771→                        <span style={{
+   772→                          display: 'inline-block', width: 80, textAlign: 'center', padding: '6px 8px',
+   773→                          border: isLiveScore ? '1.5px solid #22C55E' : '1.5px solid #86EFAC',
+   774→                          borderRadius: 6, fontSize: 13, fontWeight: 700, color: '#15803D',
+   775→                          background: isLiveScore ? '#F0FDF4' : '#FAFAFA',
+   776→                          fontFamily: "'DM Sans', sans-serif",
+   777→                          boxShadow: isLiveScore ? '0 0 0 2px rgba(34,197,94,0.15)' : 'none',
+   778→                        }}>
+   779→                          {pastWeekScores.green}
+   780→                        </span>
+   781→                        <span style={{ fontSize: 10, color: 'var(--t3)', marginLeft: 4 }}>%</span>
+   782→                      </td>
+   783→                    </tr>
+   784→
+   785→                    {/* Next Week Plan Row — editable, employee commits for next week */}
+   786→                    <tr>
+   787→                      <td style={{
+   788→                        padding: '10px 14px',
+   789→                        fontWeight: 700,
+   790→                        borderBottom: 'none',
+   791→                        color: 'var(--t1)',
+   792→                      }}>
+   793→                        🎯 Next Week Plan
+   794→                      </td>
+   795→                      <td style={{ padding: '8px 14px', borderBottom: 'none', textAlign: 'center', background: '#FEF2F288' }}>
+   796→                        <input
+   797→                          type="number"
+   798→                          min={0}
+   799→                          max={100}
+   800→                          value={mergedPlanForm.nextRedScore}
+   801→                          onChange={e => updatePlanField('nextRedScore', Number(e.target.value))}
+   802→                          style={{
+   803→                            width: 80, textAlign: 'center', padding: '6px 8px',
+   804→                            border: '1.5px solid #FCA5A5', borderRadius: 6,
+   805→                            fontSize: 13, fontWeight: 700, color: '#DC2626',
+   806→                            background: '#FFF', fontFamily: "'DM Sans', sans-serif",
+   807→                          }}
+   808→                        />
+   809→                        <span style={{ fontSize: 10, color: 'var(--t3)', marginLeft: 4 }}>%</span>
+   810→                      </td>
+   811→                      <td style={{ padding: '8px 14px', borderBottom: 'none', textAlign: 'center', background: '#FFFBEB88' }}>
+   812→                        <input
+   813→                          type="number"
+   814→                          min={0}
+   815→                          max={100}
+   816→                          value={mergedPlanForm.nextYellowScore}
+   817→                          onChange={e => updatePlanField('nextYellowScore', Number(e.target.value))}
+   818→                          style={{
+   819→                            width: 80, textAlign: 'center', padding: '6px 8px',
+   820→                            border: '1.5px solid #FCD34D', borderRadius: 6,
+   821→                            fontSize: 13, fontWeight: 700, color: '#D97706',
+   822→                            background: '#FFF', fontFamily: "'DM Sans', sans-serif",
+   823→                          }}
+   824→                        />
+   825→                        <span style={{ fontSize: 10, color: 'var(--t3)', marginLeft: 4 }}>%</span>
+   826→                      </td>
+   827→                      <td style={{ padding: '8px 14px', borderBottom: 'none', textAlign: 'center', background: '#F0FDF488' }}>
+   828→                        <input
+   829→                          type="number"
+   830→                          min={0}
+   831→                          max={100}
+   832→                          value={mergedPlanForm.nextGreenScore}
+   833→                          onChange={e => updatePlanField('nextGreenScore', Number(e.target.value))}
+   834→                          style={{
+   835→                            width: 80, textAlign: 'center', padding: '6px 8px',
+   836→                            border: '1.5px solid #86EFAC', borderRadius: 6,
+   837→                            fontSize: 13, fontWeight: 700, color: '#15803D',
+   838→                            background: '#FFF', fontFamily: "'DM Sans', sans-serif",
+   839→                          }}
+   840→                        />
+   841→                        <span style={{ fontSize: 10, color: 'var(--t3)', marginLeft: 4 }}>%</span>
+   842→                      </td>
+   843→                    </tr>
+   844→                  </tbody>
+   845→                </table>
+   846→              </div>
+   847→
+   848→              {/* Visual Score Bar */}
+   849→              <div style={{ marginTop: 14, padding: '12px 14px', background: 'var(--bg)', borderRadius: 'var(--r-sm)' }}>
+   850→                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+   851→                  <span style={{ fontSize: 10, fontWeight: 800, textTransform: 'uppercase', letterSpacing: 0.8, color: 'var(--t3)' }}>
+   852→                    Actual Performance Distribution
+   853→                  </span>
+   854→                  {isLiveScore && (
+   855→                    <span style={{ fontSize: 9, fontWeight: 700, color: '#059669', display: 'flex', alignItems: 'center', gap: 3 }}>
+   856→                      <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#22C55E', animation: 'livePulse 2s ease-in-out infinite' }} />
+   857→                      Live from task data
+   858→                    </span>
+   859→                  )}
+   860→                </div>
+   861→                <div style={{ display: 'flex', height: 24, borderRadius: 6, overflow: 'hidden', background: 'var(--b1)' }}>
+   862→                  {(() => {
+   863→                    const total = pastWeekScores.red + pastWeekScores.yellow + pastWeekScores.green
+   864→                    if (total === 0) return <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 11, color: 'var(--t4)' }}>
+   865→                      {weeklyScoreLoading ? 'Loading live scores...' : 'No task data for this week'}
+   866→                    </div>
+   867→                    const rPct = (pastWeekScores.red / total) * 100
+   868→                    const yPct = (pastWeekScores.yellow / total) * 100
+   869→                    const gPct = (pastWeekScores.green / total) * 100
+   870→                    return (
+   871→                      <>
+   872→                        {rPct > 0 && <div style={{ width: `${rPct}%`, background: '#EF4444', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 10, fontWeight: 700, color: '#fff' }}>{rPct >= 10 ? `${rPct.toFixed(1)}%` : ''}</div>}
+   873→                        {yPct > 0 && <div style={{ width: `${yPct}%`, background: '#F59E0B', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 10, fontWeight: 700, color: '#fff' }}>{yPct >= 10 ? `${yPct.toFixed(1)}%` : ''}</div>}
+   874→                        {gPct > 0 && <div style={{ width: `${gPct}%`, background: '#22C55E', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 10, fontWeight: 700, color: '#fff' }}>{gPct >= 10 ? `${gPct.toFixed(1)}%` : ''}</div>}
+   875→                      </>
+   876→                    )
+   877→                  })()}
+   878→                </div>
+   879→              </div>
+   880→
+   881→              {/* Next Week Plan — Monday Meeting Commitments */}
+   882→              <div style={{ marginTop: 14 }}>
+   883→                <label style={{ fontSize: 10, fontWeight: 800, textTransform: 'uppercase', letterSpacing: 0.8, color: 'var(--t3)', marginBottom: 6, display: 'block' }}>
+   884→                  🤝 Next Week Plan — Monday Meeting Commitments
+   885→                </label>
+   886→                <textarea
+   887→                  className="fi"
+   888→                  value={mergedPlanForm.commitments}
+   889→                  onChange={e => updatePlanField('commitments', e.target.value)}
+   890→                  placeholder="Enter commitments for next week..."
+   891→                  rows={3}
+   892→                  style={{ resize: 'vertical', minHeight: 70 }}
+   893→                />
+   894→              </div>
+   895→
+   896→              {/* Notes */}
+   897→              <div style={{ marginTop: 10 }}>
+   898→                <label style={{ fontSize: 10, fontWeight: 800, textTransform: 'uppercase', letterSpacing: 0.8, color: 'var(--t3)', marginBottom: 6, display: 'block' }}>
+   899→                  📝 Notes / Remarks
+   900→                </label>
+   901→                <textarea
+   902→                  className="fi"
+   903→                  value={mergedPlanForm.notes}
+   904→                  onChange={e => updatePlanField('notes', e.target.value)}
+   905→                  placeholder="Any additional notes..."
+   906→                  rows={2}
+   907→                  style={{ resize: 'vertical', minHeight: 50 }}
+   908→                />
+   909→              </div>
+   910→
+   911→              {/* Save Button + Warning */}
+   912→              <div style={{ marginTop: 16, textAlign: 'center' }}>
+   913→                <button
+   914→                  className="btn btn-gold"
+   915→                  style={{ padding: '12px 48px', fontSize: 14, fontWeight: 800 }}
+   916→                  onClick={() => saveMutation.mutate()}
+   917→                  disabled={saving || !selectedUserId}
+   918→                >
+   919→                  {saving ? '⏳ Saving...' : '💾 Save Scorecard'}
+   920→                </button>
+   921→                <div style={{ marginTop: 8, fontSize: 11, fontWeight: 700, color: 'var(--red)', textTransform: 'uppercase', letterSpacing: 0.5 }}>
+   922→                  ⚠ Don&apos;t press the save button twice
+   923→                </div>
+   924→              </div>
+   925→            </div>
+   926→          </div>
+   927→
+   928→          {/* Past Week Performance History */}
+   929→          <div className="g2">
+   930→            <div className="lcard">
+   931→              <div className="ch">
+   932→                <div className="ct">📊 Past Week Performance</div>
+   933→                <span className="badge b-blue">{pastWeeks.length} weeks</span>
+   934→              </div>
+   935→              <div className="cb">
+   936→                {pastWeeks.length === 0 ? (
+   937→                  <div style={{ textAlign: 'center', padding: 30, color: 'var(--t3)', fontSize: 12 }}>
+   938→                    No past scorecard data for {selectedUser?.name}
+   939→                  </div>
+   940→                ) : (
+   941→                  <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+   942→                    {pastWeeks.map((sc: ScorecardData) => {
+   943→                      const total = sc.actualRedScore + sc.actualYellowScore + sc.actualGreenScore
+   944→                      const rPct = total > 0 ? (sc.actualRedScore / total) * 100 : 0
+   945→                      const yPct = total > 0 ? (sc.actualYellowScore / total) * 100 : 0
+   946→                      const gPct = total > 0 ? (sc.actualGreenScore / total) * 100 : 0
+   947→                      return (
+   948→                        <div key={sc.id} style={{
+   949→                          padding: '10px 14px',
+   950→                          background: 'var(--bg)',
+   951→                          borderRadius: 'var(--r-sm)',
+   952→                          border: '1px solid var(--b1)',
+   953→                        }}>
+   954→                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+   955→                            <div>
+   956→                              <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--t1)' }}>Week {sc.weekNumber}</span>
+   957→                              <span style={{ fontSize: 11, color: 'var(--t3)', marginLeft: 8 }}>
+   958→                                {formatDate(new Date(sc.weekStartDate))} — {formatDate(new Date(sc.weekEndDate))}
+   959→                              </span>
+   960→                            </div>
+   961→                            <div style={{ display: 'flex', gap: 6 }}>
+   962→                              <span style={{
+   963→                                fontSize: 12, fontWeight: 800,
+   964→                                color: sc.prScore >= 70 ? 'var(--green)' : sc.prScore >= 40 ? 'var(--amber)' : 'var(--red)',
+   965→                              }}>
+   966→                                PR: {sc.prScore || '—'}
+   967→                              </span>
+   968→                              <button
+   969→                                className="btn btn-xs btn-ghost"
+   970→                                onClick={() => deleteMutation.mutate(sc.id)}
+   971→                                style={{ padding: '2px 6px', fontSize: 10, color: 'var(--red)' }}
+   972→                              >
+   973→                                ✕
+   974→                              </button>
+   975→                            </div>
+   976→                          </div>
+   977→                          {/* Mini bar */}
+   978→                          {total > 0 && (
+   979→                            <div style={{ display: 'flex', height: 14, borderRadius: 4, overflow: 'hidden' }}>
+   980→                              {rPct > 0 && <div style={{ width: `${rPct}%`, background: '#EF4444', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 8, fontWeight: 700, color: '#fff' }}>{rPct >= 15 ? `${rPct.toFixed(0)}%` : ''}</div>}
+   981→                              {yPct > 0 && <div style={{ width: `${yPct}%`, background: '#F59E0B', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 8, fontWeight: 700, color: '#fff' }}>{yPct >= 15 ? `${yPct.toFixed(0)}%` : ''}</div>}
+   982→                              {gPct > 0 && <div style={{ width: `${gPct}%`, background: '#22C55E', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 8, fontWeight: 700, color: '#fff' }}>{gPct >= 15 ? `${gPct.toFixed(0)}%` : ''}</div>}
+   983→                            </div>
+   984→                          )}
+   985→                          {/* Score details */}
+   986→                          <div style={{ display: 'flex', gap: 12, marginTop: 5, fontSize: 10, color: 'var(--t3)' }}>
+   987→                            <span style={{ color: '#EF4444', fontWeight: 700 }}>🔴 {sc.actualRedScore}%</span>
+   988→                            <span style={{ color: '#F59E0B', fontWeight: 700 }}>🟡 {sc.actualYellowScore}%</span>
+   989→                            <span style={{ color: '#22C55E', fontWeight: 700 }}>🟢 {sc.actualGreenScore}%</span>
+   990→                          </div>
+   991→                          {/* Commitments preview */}
+   992→                          {sc.commitments && (
+   993→                            <div style={{ marginTop: 5, fontSize: 11, color: 'var(--t2)', fontStyle: 'italic' }}>
+   994→                              🎯 {sc.commitments.length > 80 ? sc.commitments.slice(0, 80) + '...' : sc.commitments}
+   995→                            </div>
+   996→                          )}
+   997→                        </div>
+   998→                      )
+   999→                    })}
+  1000→                  </div>
+  1001→                )}
+  1002→              </div>
+  1003→            </div>
+  1004→
+  1005→            {/* All Team Members Quick View */}
+  1006→            <div className="lcard">
+  1007→              <div className="ch">
+  1008→                <div className="ct">👥 Team Overview</div>
+  1009→                <span className="badge b-gold">{doers.length} members</span>
+  1010→              </div>
+  1011→              <div className="cb" style={{ padding: 0 }}>
+  1012→                <table className="ltable">
+  1013→                  <thead>
+  1014→                    <tr>
+  1015→                      <th>Doer Name</th>
+  1016→                      <th>Department</th>
+  1017→                      <th>PR</th>
+  1018→                      <th>Weeks</th>
+  1019→                    </tr>
+  1020→                  </thead>
+  1021→                  <tbody>
+  1022→                    {doers.map((u: any) => {
+  1023→                      const userScorecards = scorecards.filter((s: ScorecardData) => s.userId === u.id)
+  1024→                      const latestSC = userScorecards.length > 0 ? userScorecards[0] : null
+  1025→                      const isSelected = u.id === selectedUserId
+  1026→                      return (
+  1027→                        <tr
+  1028→                          key={u.id}
+  1029→                          onClick={() => handleUserChange(u.id)}
+  1030→                          style={{
+  1031→                            cursor: 'pointer',
+  1032→                            background: isSelected ? 'rgba(59,130,246,.06)' : undefined,
+  1033→                          }}
+  1034→                        >
+  1035→                          <td style={{ fontWeight: 700 }}>
+  1036→                            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+  1037→                              <div style={{
+  1038→                                width: 28, height: 28, borderRadius: '50%',
+  1039→                                background: isSelected ? 'linear-gradient(135deg,#3b82f6,#2563eb)' : 'linear-gradient(135deg,var(--g1),var(--g3))',
+  1040→                                display: 'flex', alignItems: 'center', justifyContent: 'center',
+  1041→                                fontSize: 10, fontWeight: 800, color: '#fff',
+  1042→                              }}>
+  1043→                                {u.name.split(' ').map((n: string) => n[0]).join('').toUpperCase().slice(0, 2)}
+  1044→                              </div>
+  1045→                              <div>
+  1046→                                <div style={{ fontSize: 12.5 }}>{u.name}</div>
+  1047→                                <div style={{ fontSize: 10, color: 'var(--t3)' }}>{u.phone || ''}</div>
+  1048→                              </div>
+  1049→                            </div>
+  1050→                          </td>
+  1051→                          <td>
+  1052→                            <span className="badge b-gray" style={{ fontSize: 9 }}>{u.department || '—'}</span>
+  1053→                          </td>
+  1054→                          <td style={{ fontWeight: 800, color: latestSC ? (latestSC.prScore >= 70 ? 'var(--green)' : latestSC.prScore >= 40 ? 'var(--amber)' : 'var(--red)') : 'var(--t4)' }}>
+  1055→                            {latestSC ? latestSC.prScore : '—'}
+  1056→                          </td>
+  1057→                          <td style={{ color: 'var(--t3)', fontSize: 11 }}>
+  1058→                            {userScorecards.length > 0 ? `${userScorecards.length} saved` : 'No data'}
+  1059→                          </td>
+  1060→                        </tr>
+  1061→                      )
+  1062→                    })}
+  1063→                  </tbody>
+  1064→                </table>
+  1065→              </div>
+  1066→            </div>
+  1067→          </div>
+  1068→        </>
+  1069→      )}
+  1070→    </div>
+  1071→  )
+  1072→}
+  1073→
