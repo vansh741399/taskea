@@ -363,7 +363,7 @@ export async function GET(request: NextRequest) {
 
     // ─── Return in requested format ───
     if (format === 'xlsx') {
-      return buildAdminExcelResponse(report, { month, year, location })
+      return await buildAdminExcelResponse(report, { month, year, location })
     }
 
     // JSON format
@@ -798,149 +798,343 @@ function computeEmployeeReport(
 }
 
 // ════════════════════════════════════════════════════════════════════════
-// EXCEL — Admin view (5 sheets)
+// EXCEL — Admin view (2 sheets, professional)
+// v25·0806-pro: Redesigned with ExcelJS for eye-catching, professional output.
+//   • Sheet 1: HR Report — branded header, color-coded score columns
+//   • Sheet 2: Employee Master — HRMS data (salary, bank, etc.)
+//   Removed per founder request:
+//     - Sheet 3 (Scoring Rules)
+//     - Sheet 4 (Location Summary)
+//     - Sheet 5 (Report Info)
+//     - Columns: Location, Firm, HRMS ID, Joining Date from Sheet 1
 // ════════════════════════════════════════════════════════════════════════
-function buildAdminExcelResponse(report: any[], filters: { month: number; year: number; location: string }) {
-  const wb = XLSX.utils.book_new()
+async function buildAdminExcelResponse(report: any[], filters: { month: number; year: number; location: string }) {
   const { month, year, location } = filters
+  const monthLabel = new Date(year, month - 1, 1).toLocaleDateString('en-IN', { month: 'long', year: 'numeric' })
 
-  // Sheet 1: HR Report (main)
-  const reportData = report.map(r => ({
-    'S.No': r.sno,
-    'Name of Employee': r.name,
-    'Designation': r.designation,
-    'Department': r.department,
-    'Location': r.location,
-    'Full Day Leaves': r.fullDayLeaves,
-    'Half Days': r.halfDayLeaves,
-    'Uninformed Leaves': r.uninformedLeaves,
-    'Late Comings': r.lateComings,
-    'Early Goings': r.earlyGoings,
-    'Late/Early Total': r.lateComingsEarlyGoings,
-    'Total Presents': r.totalPresents,
-    'Max Score': r.maxScore,
-    'Deductions': r.deductions,
-    'Overall Score (out of 10)': r.overallScore,
-    'Status': r.status,
-    'HRMS ID': r.hrms?.hrmsEmployeeId || '',
-    'Joining Date': r.hrms?.joiningDate ? new Date(r.hrms.joiningDate).toLocaleDateString('en-IN') : '',
-  }))
-  const ws1 = XLSX.utils.json_to_sheet(reportData)
-  ws1['!cols'] = [
-    { wch: 6 }, { wch: 22 }, { wch: 25 }, { wch: 12 }, { wch: 12 },
-    { wch: 10 }, { wch: 10 }, { wch: 15 }, { wch: 10 }, { wch: 10 },
-    { wch: 12 }, { wch: 12 }, { wch: 10 }, { wch: 12 },
-    { wch: 18 }, { wch: 8 }, { wch: 12 }, { wch: 14 },
-  ]
-  // Freeze top row (header) — WPS-compatible
-  ws1['!freeze'] = { xSplit: 0, ySplit: 1 }
-  XLSX.utils.book_append_sheet(wb, ws1, 'HR Report')
+  // ─── Color palette ─────────────────────────────────────────────────────
+  const C = {
+    brandDark:   'FF4C1D95',
+    brandMid:    'FF6D28D9',
+    brandLight:  'FFEDE9FE',
+    good:        'FF059669',
+    goodBg:      'FFD1FAE5',
+    warn:        'FFD97706',
+    warnBg:      'FFFEF3C7',
+    bad:         'FFDC2626',
+    badBg:       'FFFEE2E2',
+    textDark:    'FF1F2937',
+    textMuted:   'FF6B7280',
+    borderLight: 'FFE5E7EB',
+    white:       'FFFFFFFF',
+    zebra:       'FFF9FAFB',
+    hdrBg:       'FF1F2937',   // dark slate header
+    accentGold:  'FFF59E0B',
+  }
 
-  // Sheet 2: Employee Master (HRMS data)
-  const masterData = report
-    .filter(r => r.hrms)
-    .map(r => ({
-      'Name': r.name,
-      'HRMS ID': r.hrms.hrmsEmployeeId,
-      'Designation': r.designation,
-      'Department': r.department,
-      'Firm': r.hrms.firm,
-      'Location': r.location,
-      'Employment Type': r.hrms.employmentType,
-      'Salary Type': r.hrms.salaryType,
-      'Monthly Salary': r.hrms.monthlySalary,
-      'Daily Rate': r.hrms.dailyRate,
-      'Hourly Rate': r.hrms.hourlyRate,
-      'Overtime Rate': r.hrms.overtimeRate,
-      'Shift Start': r.hrms.shiftStart,
-      'Shift End': r.hrms.shiftEnd,
-      'Shift Hours': r.hrms.shiftHours,
-      'Gender': r.hrms.gender,
-      'Joining Date': r.hrms.joiningDate ? new Date(r.hrms.joiningDate).toLocaleDateString('en-IN') : '',
-      'Reporting Manager': r.hrms.reportingManager,
-      'Bank Name': r.hrms.bankName,
-      'Bank Account': r.hrms.bankAccount,
-      'Bank IFSC': r.hrms.bankIfsc,
-      'PAN': r.hrms.panNumber,
-      'Aadhaar': r.hrms.aadhaarNumber,
-      'PF Number': r.hrms.pfNumber,
-      'ESI Number': r.hrms.esiNumber,
-      'Emergency Contact': r.hrms.emergencyContact,
-      'HRMS Status': r.hrms.hrmsStatus,
-    }))
-  const ws2 = XLSX.utils.json_to_sheet(masterData)
-  ws2['!cols'] = [
-    { wch: 22 }, { wch: 12 }, { wch: 25 }, { wch: 12 }, { wch: 10 },
-    { wch: 12 }, { wch: 14 }, { wch: 12 }, { wch: 14 }, { wch: 12 },
-    { wch: 12 }, { wch: 12 }, { wch: 10 }, { wch: 10 }, { wch: 10 },
-    { wch: 10 }, { wch: 14 }, { wch: 20 }, { wch: 18 }, { wch: 18 },
-    { wch: 12 }, { wch: 14 }, { wch: 14 }, { wch: 14 }, { wch: 14 },
-    { wch: 18 }, { wch: 10 },
-  ]
-  XLSX.utils.book_append_sheet(wb, ws2, 'Employee Master')
+  const thin = { style: 'thin' as const, color: { argb: C.borderLight } }
+  const borderAll = { top: thin, left: thin, bottom: thin, right: thin }
+  const fontHdr = { name: 'Calibri', size: 11, bold: true, color: { argb: C.white } }
+  const fontVal = { name: 'Calibri', size: 10, color: { argb: C.textDark } }
+  const fontValBold = { name: 'Calibri', size: 10, bold: true, color: { argb: C.textDark } }
+  const alignCenter = { vertical: 'middle' as const, horizontal: 'center' as const }
+  const alignLeft = { vertical: 'middle' as const, horizontal: 'left' as const, indent: 1 }
 
-  // Sheet 3: Scoring Rules (out of 10)
-  const rulesData = [
-    { 'Rule': 'Max Score', 'Value': MAX_SCORE, 'Description': 'Score is OUT OF 10. Starts at 10, deductions applied per marking scheme.' },
-    { 'Rule': 'Base Score', 'Value': MAX_SCORE, 'Description': 'Every employee starts the month at 10/10' },
-    { 'Rule': 'Late Coming Threshold', 'Value': `${SHIFT_START_HOUR}:${String(LATE_THRESHOLD_MINUTES).padStart(2,'0')} AM`, 'Description': 'Punch-in after this time = late' },
-    { 'Rule': 'Early Going Threshold', 'Value': `${SHIFT_END_HOUR}:00 PM`, 'Description': 'Punch-out before this time = early' },
-    { 'Rule': 'Low Score Threshold', 'Value': 7, 'Description': 'Scores below 7 are marked RED' },
-    { 'Rule': 'Score Formula', 'Value': '10 − Deductions', 'Description': 'Final score clamped between 0 and 10' },
-    {},
-    { 'Rule': '−1 Deductions', 'Value': '', 'Description': '' },
-    { 'Rule': 'Leaves > 2', 'Value': -1, 'Description': 'If total leave days > 2 in a month' },
-    { 'Rule': 'Late/Early > 1', 'Value': -1, 'Description': 'If late comings + early goings > 1' },
-    { 'Rule': 'Uninformed > 1', 'Value': -1, 'Description': 'If uninformed leaves > 1' },
-    { 'Rule': 'Half Days > 2', 'Value': -1, 'Description': 'If half day leaves > 2' },
-    {},
-    { 'Rule': '−2 Deductions (severe)', 'Value': '', 'Description': '' },
-    { 'Rule': 'Leaves > 5', 'Value': -2, 'Description': 'If total leave days > 5' },
-    { 'Rule': 'Late/Early > 4', 'Value': -2, 'Description': 'If late comings + early goings > 4' },
-    { 'Rule': 'Uninformed > 3', 'Value': -2, 'Description': 'If uninformed leaves > 3' },
-    { 'Rule': 'Half Days > 4', 'Value': -2, 'Description': 'If half day leaves > 4' },
-  ]
-  const ws3 = XLSX.utils.json_to_sheet(rulesData)
-  ws3['!cols'] = [{ wch: 28 }, { wch: 18 }, { wch: 50 }]
-  XLSX.utils.book_append_sheet(wb, ws3, 'Scoring Rules')
+  const wb = new ExcelJS.Workbook()
+  wb.creator = 'Laxree ERP'
+  wb.created = new Date()
 
-  // Sheet 4: Location Summary
-  const locSummary: Record<string, any> = {}
-  report.forEach(r => {
-    const loc = r.location || 'Unknown'
-    if (!locSummary[loc]) {
-      locSummary[loc] = { 'Location': loc, 'Total Employees': 0, 'Avg Presents': 0, 'Avg Score': 0, 'Low Score Count': 0 }
-    }
-    locSummary[loc]['Total Employees']++
-    locSummary[loc]['Avg Presents'] += r.totalPresents
-    locSummary[loc]['Avg Score'] += r.overallScore
-    if (r.isLowScore) locSummary[loc]['Low Score Count']++
+  // ═══════════════════════════════════════════════════════════════════════
+  // SHEET 1: HR Report
+  // ═══════════════════════════════════════════════════════════════════════
+  const ws1 = wb.addWorksheet('HR Report', {
+    properties: { defaultRowHeight: 18 },
+    views: [{ showGridLines: false, ySplit: 4 }],
   })
-  const locArray = Object.values(locSummary).map((d: any) => ({
-    ...d,
-    'Avg Presents': d['Total Employees'] > 0 ? Math.round(d['Avg Presents'] / d['Total Employees']) : 0,
-    'Avg Score': d['Total Employees'] > 0 ? Math.round(d['Avg Score'] / d['Total Employees']) : 0,
-  }))
-  const ws4 = XLSX.utils.json_to_sheet(locArray)
-  ws4['!cols'] = [{ wch: 14 }, { wch: 16 }, { wch: 14 }, { wch: 12 }, { wch: 16 }]
-  XLSX.utils.book_append_sheet(wb, ws4, 'Location Summary')
 
-  // Sheet 5: Report Info
-  const metaData = [{
-    'Report': 'Laxree HR Report',
-    'Generated At': new Date().toLocaleString('en-IN'),
-    'Month': `${month}/${year}`,
-    'Location Filter': location,
-    'Total Employees': report.length,
-    'Scoring Type': 'Out of 10',
-    'Low Score Threshold': 7,
-    'HRMS Synced': report.some(r => r.hrms) ? 'Yes' : 'No',
-  }]
-  const ws5 = XLSX.utils.json_to_sheet(metaData)
-  ws5['!cols'] = [{ wch: 25 }, { wch: 25 }, { wch: 12 }, { wch: 15 }, { wch: 15 }, { wch: 20 }, { wch: 18 }, { wch: 15 }]
-  XLSX.utils.book_append_sheet(wb, ws5, 'Report Info')
+  // Define columns (Location, Firm, HRMS ID, Joining Date removed per founder request)
+  const cols = [
+    { key: 'sno',           header: '#',                  width: 6 },
+    { key: 'name',          header: 'Name of Employee',   width: 24 },
+    { key: 'designation',   header: 'Designation',        width: 24 },
+    { key: 'department',    header: 'Department',         width: 14 },
+    { key: 'fullDayLeaves', header: 'Full Day Leaves',    width: 8 },
+    { key: 'halfDayLeaves', header: 'Half Days',          width: 8 },
+    { key: 'uninformed',    header: 'Uninformed',         width: 10 },
+    { key: 'lateComings',   header: 'Late Comings',       width: 8 },
+    { key: 'earlyGoings',   header: 'Early Goings',       width: 8 },
+    { key: 'lateEarlyTot',  header: 'L/E Total',          width: 8 },
+    { key: 'presents',      header: 'Presents',           width: 8 },
+    { key: 'maxScore',      header: 'Max Score',          width: 8 },
+    { key: 'deductions',    header: 'Deductions',         width: 10 },
+    { key: 'score',         header: 'Score /10',          width: 10 },
+    { key: 'status',        header: 'Status',             width: 10 },
+  ]
+  ws1.columns = cols
 
-  const buf = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' })
+  // Row 1: spacer (thin)
+  ws1.addRow([])
+  ws1.getRow(1).height = 6
+
+  // Row 2: Title bar
+  const lastCol = cols.length
+  const lastColLetter = String.fromCharCode(64 + lastCol)
+  ws1.mergeCells(`A2:${lastColLetter}2`)
+  const t = ws1.getCell('A2')
+  t.value = 'LAXREE HR REPORT'
+  t.font = { name: 'Calibri', size: 18, bold: true, color: { argb: C.white } }
+  t.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: C.brandDark } }
+  t.alignment = { vertical: 'middle', horizontal: 'left', indent: 1 }
+  ws1.getRow(2).height = 32
+
+  // Row 3: subtitle (period + filter)
+  ws1.mergeCells(`A3:${lastColLetter}3`)
+  const s = ws1.getCell('A3')
+  s.value = `${monthLabel}  ·  Location: ${location === 'all' ? 'All Locations' : location}  ·  ${report.length} employees`
+  s.font = { name: 'Calibri', size: 11, bold: true, color: { argb: C.white } }
+  s.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: C.brandMid } }
+  s.alignment = { vertical: 'middle', horizontal: 'left', indent: 1 }
+  ws1.getRow(3).height = 22
+
+  // Row 4: spacer
+  ws1.addRow([])
+  ws1.getRow(4).height = 6
+
+  // Row 5: Header row
+  const hdrRow = ws1.getRow(5)
+  hdrRow.height = 28
+  cols.forEach((c, i) => {
+    const cell = hdrRow.getCell(i + 1)
+    cell.value = c.header
+    cell.font = fontHdr
+    cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: C.hdrBg } }
+    cell.alignment = alignCenter
+    cell.border = borderAll
+  })
+
+  // Data rows
+  let rowIdx = 6
+  report.forEach((r, i) => {
+    const isZebra = i % 2 === 1
+    const rowBg = isZebra ? C.zebra : C.white
+
+    const isLow = r.isLowScore
+    const isAvg = !isLow && r.overallScore < 8
+    const scoreColor = isLow ? C.bad : isAvg ? C.warn : C.good
+    const scoreBg    = isLow ? C.badBg : isAvg ? C.warnBg : C.goodBg
+
+    const rowData: any = {
+      sno: i + 1,
+      name: r.name,
+      designation: r.designation,
+      department: r.department,
+      fullDayLeaves: r.fullDayLeaves,
+      halfDayLeaves: r.halfDayLeaves,
+      uninformed: r.uninformedLeaves,
+      lateComings: r.lateComings,
+      earlyGoings: r.earlyGoings,
+      lateEarlyTot: r.lateComingsEarlyGoings,
+      presents: r.totalPresents,
+      maxScore: r.maxScore,
+      deductions: `− ${r.deductions}`,
+      score: `${r.overallScore} / 10`,
+      status: r.status,
+    }
+    const dataRow = ws1.getRow(rowIdx)
+    dataRow.values = rowData
+    dataRow.height = 18
+
+    cols.forEach((c, ci) => {
+      const cell = dataRow.getCell(ci + 1)
+      cell.border = borderAll
+      cell.alignment = alignCenter
+      cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: rowBg } }
+
+      // Per-cell styling
+      if (c.key === 'name') {
+        cell.font = fontValBold
+        cell.alignment = alignLeft
+      } else if (c.key === 'designation') {
+        cell.font = fontVal
+        cell.alignment = alignLeft
+      } else if (c.key === 'score' || c.key === 'status') {
+        cell.font = { ...fontValBold, color: { argb: scoreColor } }
+        cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: scoreBg } }
+      } else if (c.key === 'deductions') {
+        const hasDeduct = r.deductions > 0
+        cell.font = { ...fontValBold, color: { argb: hasDeduct ? C.bad : C.textMuted } }
+      } else if (['fullDayLeaves', 'halfDayLeaves', 'uninformed', 'lateComings', 'earlyGoings'].includes(c.key)) {
+        const val = (cell.value as number) || 0
+        if (val > 0) cell.font = { ...fontValBold, color: { argb: C.warn } }
+        else cell.font = fontVal
+      } else {
+        cell.font = fontVal
+      }
+    })
+    rowIdx++
+  })
+
+  // Freeze the top 5 rows (title + subtitle + spacer + header)
+  ws1.views = [{ showGridLines: false, ySplit: 5 }]
+
+  // Auto-filter on the header row (row 5)
+  ws1.autoFilter = {
+    from: { row: 5, column: 1 },
+    to: { row: 5, column: cols.length },
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════
+  // SHEET 2: Employee Master (HRMS data)
+  // ═══════════════════════════════════════════════════════════════════════
+  const ws2 = wb.addWorksheet('Employee Master', {
+    properties: { defaultRowHeight: 18 },
+    views: [{ showGridLines: false, ySplit: 4 }],
+  })
+  const masterCols = [
+    { key: 'name',           header: 'Name',             width: 24 },
+    { key: 'hrmsId',         header: 'HRMS ID',          width: 12 },
+    { key: 'designation',    header: 'Designation',      width: 24 },
+    { key: 'department',     header: 'Department',       width: 14 },
+    { key: 'firm',           header: 'Firm',             width: 22 },
+    { key: 'location',       header: 'Location',         width: 14 },
+    { key: 'empType',        header: 'Employment Type',  width: 14 },
+    { key: 'salaryType',     header: 'Salary Type',      width: 12 },
+    { key: 'monthlySalary',  header: 'Monthly Salary',   width: 14 },
+    { key: 'dailyRate',      header: 'Daily Rate',       width: 12 },
+    { key: 'hourlyRate',     header: 'Hourly Rate',      width: 12 },
+    { key: 'overtimeRate',   header: 'Overtime Rate',    width: 12 },
+    { key: 'shiftStart',     header: 'Shift Start',      width: 10 },
+    { key: 'shiftEnd',       header: 'Shift End',        width: 10 },
+    { key: 'shiftHours',     header: 'Shift Hours',      width: 10 },
+    { key: 'gender',         header: 'Gender',           width: 10 },
+    { key: 'joiningDate',    header: 'Joining Date',     width: 14 },
+    { key: 'reportingMgr',   header: 'Reporting Mgr',    width: 20 },
+    { key: 'bankName',       header: 'Bank Name',        width: 18 },
+    { key: 'bankAccount',    header: 'Bank A/C',         width: 18 },
+    { key: 'bankIfsc',       header: 'IFSC',             width: 12 },
+    { key: 'pan',            header: 'PAN',              width: 14 },
+    { key: 'aadhaar',        header: 'Aadhaar',          width: 16 },
+    { key: 'pf',             header: 'PF Number',        width: 14 },
+    { key: 'esi',            header: 'ESI Number',       width: 14 },
+    { key: 'emergency',      header: 'Emergency Contact',width: 18 },
+    { key: 'hrmsStatus',     header: 'HRMS Status',      width: 10 },
+  ]
+  ws2.columns = masterCols
+
+  // ExcelJS column letter helper (handles >26 cols: e.g. col 27 → "AA")
+  const colLetter = (n: number) => {
+    let s = ''
+    while (n > 0) {
+      const rem = (n - 1) % 26
+      s = String.fromCharCode(65 + rem) + s
+      n = Math.floor((n - 1) / 26)
+    }
+    return s
+  }
+  const lastColLetter2 = colLetter(masterCols.length)
+
+  // Row 1: spacer
+  ws2.addRow([])
+  ws2.getRow(1).height = 6
+
+  // Row 2: Title
+  ws2.mergeCells(`A2:${lastColLetter2}2`)
+  const t2 = ws2.getCell('A2')
+  t2.value = 'EMPLOYEE MASTER (HRMS DATA)'
+  t2.font = { name: 'Calibri', size: 16, bold: true, color: { argb: C.white } }
+  t2.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: C.brandDark } }
+  t2.alignment = { vertical: 'middle', horizontal: 'left', indent: 1 }
+  ws2.getRow(2).height = 28
+
+  // Row 3: subtitle
+  ws2.mergeCells(`A3:${lastColLetter2}3`)
+  const s2 = ws2.getCell('A3')
+  s2.value = `${monthLabel}  ·  ${report.filter(r => r.hrms).length} employees with HRMS records`
+  s2.font = { name: 'Calibri', size: 11, bold: true, color: { argb: C.white } }
+  s2.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: C.brandMid } }
+  s2.alignment = { vertical: 'middle', horizontal: 'left', indent: 1 }
+  ws2.getRow(3).height = 20
+
+  // Row 4: spacer
+  ws2.addRow([])
+  ws2.getRow(4).height = 6
+
+  // Row 5: header
+  const hdrRow2 = ws2.getRow(5)
+  hdrRow2.height = 26
+  masterCols.forEach((c, i) => {
+    const cell = hdrRow2.getCell(i + 1)
+    cell.value = c.header
+    cell.font = fontHdr
+    cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: C.hdrBg } }
+    cell.alignment = alignCenter
+    cell.border = borderAll
+  })
+
+  // Data rows
+  let rowIdx2 = 6
+  report.filter(r => r.hrms).forEach((r, i) => {
+    const isZebra = i % 2 === 1
+    const rowBg = isZebra ? C.zebra : C.white
+    const h = r.hrms
+    const masterRow: any = {
+      name: r.name,
+      hrmsId: h.hrmsEmployeeId || '—',
+      designation: r.designation || '—',
+      department: r.department || '—',
+      firm: h.firm || '—',
+      location: r.location || '—',
+      empType: h.employmentType || '—',
+      salaryType: h.salaryType || '—',
+      monthlySalary: h.monthlySalary || '—',
+      dailyRate: h.dailyRate || '—',
+      hourlyRate: h.hourlyRate ? `₹${h.hourlyRate.toFixed(2)}` : '—',
+      overtimeRate: h.overtimeRate ? `₹${h.overtimeRate.toFixed(2)}` : '—',
+      shiftStart: h.shiftStart || '—',
+      shiftEnd: h.shiftEnd || '—',
+      shiftHours: h.shiftHours || '—',
+      gender: h.gender || '—',
+      joiningDate: h.joiningDate ? new Date(h.joiningDate).toLocaleDateString('en-IN') : '—',
+      reportingMgr: h.reportingManager || '—',
+      bankName: h.bankName || '—',
+      bankAccount: h.bankAccount || '—',
+      bankIfsc: h.bankIfsc || '—',
+      pan: h.panNumber || '—',
+      aadhaar: h.aadhaarNumber || '—',
+      pf: h.pfNumber || '—',
+      esi: h.esiNumber || '—',
+      emergency: h.emergencyContact || '—',
+      hrmsStatus: h.hrmsStatus || '—',
+    }
+    const dataRow = ws2.getRow(rowIdx2)
+    dataRow.values = masterRow
+    dataRow.height = 18
+    masterCols.forEach((c, ci) => {
+      const cell = dataRow.getCell(ci + 1)
+      cell.border = borderAll
+      cell.alignment = alignLeft
+      cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: rowBg } }
+      if (c.key === 'name') {
+        cell.font = fontValBold
+      } else if (c.key === 'monthlySalary' && h.monthlySalary) {
+        cell.font = { ...fontValBold, color: { argb: C.good } }
+        cell.value = `₹ ${Number(h.monthlySalary).toLocaleString('en-IN')}`
+      } else {
+        cell.font = fontVal
+      }
+    })
+    rowIdx2++
+  })
+
+  // Freeze + auto-filter
+  ws2.views = [{ showGridLines: false, ySplit: 5 }]
+  ws2.autoFilter = {
+    from: { row: 5, column: 1 },
+    to: { row: 5, column: masterCols.length },
+  }
+
+  // ─── Write buffer & respond ────────────────────────────────────────────
+  const buf = await wb.xlsx.writeBuffer()
   const filename = `HR_Report_${year}_${String(month).padStart(2, '0')}_${location}.xlsx`
   return new NextResponse(buf, {
     status: 200,
@@ -1064,8 +1258,6 @@ async function buildSelfExcelResponse(selfReport: any, month: number, year: numb
     ['HRMS Employee ID',  emp.hrms?.hrmsEmployeeId || '—'],
     ['Firm',              emp.hrms?.firm || '—'],
     ['Employment Type',   emp.hrms?.employmentType || '—'],
-    ['Joining Date',      emp.hrms?.joiningDate ? new Date(emp.hrms.joiningDate).toLocaleDateString('en-IN') : '—'],
-    ['Reporting Manager', emp.hrms?.reportingManager || '—'],
   ]
   let r = 6
   for (const [label, value] of identityRows) {
