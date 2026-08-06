@@ -26,6 +26,7 @@ import { LaxreePushNotifications } from '@/components/laxree/laxree-push-notific
 import { LaxreeAttendancePanel } from '@/components/laxree/laxree-attendance-panel'
 import { LaxreeSalarySlipPanel } from '@/components/laxree/laxree-salary-slip-panel'
 import { LaxreeHrReport } from '@/components/laxree/laxree-hr-report'
+import { LaxreeEmpHrReport } from '@/components/laxree/laxree-emp-hr-report'
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from 'recharts'
 import { Component, useEffect, useState, Suspense, type ReactNode } from 'react'
 
@@ -190,6 +191,8 @@ function ActiveView() {
         return <LaxreeUserManagement />
       case 'hr-report':
         return <LaxreeHrReport />
+      case 'emp-hr-report':
+        return <LaxreeEmpHrReport />
       case 'ai-assistant':
         return <LaxreeAiAssistant />
       // dirDep removed

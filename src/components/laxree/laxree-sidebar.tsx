@@ -3,7 +3,7 @@
 import { useWorkflowStore } from '@/stores/workflow-store'
 import { useQuery } from '@tanstack/react-query'
 
-type ActivePage = 'dashboard' | 'executive' | 'tasks' | 'cancelled' | 'analytics' | 'performance' | 'departments' | 'team' | 'categories' | 'exthold' | 'monday' | 'escalations' | 'employee-dashboard' | 'leaves' | 'emp-leaves' | 'emp-tasks' | 'ea-tasks' | 'ai-assistant' | 'user-management' | 'attendance' | 'salary-slip' | 'hr-report'
+type ActivePage = 'dashboard' | 'executive' | 'tasks' | 'cancelled' | 'analytics' | 'performance' | 'departments' | 'team' | 'categories' | 'exthold' | 'monday' | 'escalations' | 'employee-dashboard' | 'leaves' | 'emp-leaves' | 'emp-tasks' | 'ea-tasks' | 'ai-assistant' | 'user-management' | 'attendance' | 'salary-slip' | 'hr-report' | 'emp-hr-report'
 
 interface NavItem {
   id: ActivePage
@@ -220,6 +220,17 @@ export function LaxreeSidebar() {
     },
   ]
 
+  // v25·0806 — Personal HR Report tab (employee's own attendance + HRMS data).
+  // Different from admin "HR Report" tab — this only shows the logged-in
+  // employee's own row (enforced server-side via self=1).
+  const employeeHrReport: NavItem[] = [
+    {
+      id: 'emp-hr-report', label: 'My HR Report',
+      icon: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><polyline points="14 2 14 8 20 8" /><line x1="12" y1="18" x2="12" y2="12" /><line x1="9" y1="18" x2="9" y2="15" /><line x1="15" y1="18" x2="15" y2="13" /></svg>,
+      badge: <span className="nb" style={{ background: 'rgba(109,40,217,.1)', color: '#6D28D9', fontWeight: 800 }}>MY</span>,
+    },
+  ]
+
   const employeeAI: NavItem[] = [
     {
       id: 'ai-assistant', label: 'AI Assistant',
@@ -310,6 +321,7 @@ export function LaxreeSidebar() {
       { label: 'My Tasks', items: employeeTasks },
       { label: 'Leave Management', items: employeeLeaves },
       { label: 'Attendance', items: employeeAttendance },
+      { label: 'HR Report', items: employeeHrReport },
       { label: 'Salary', items: employeeSalarySlip },
       { label: 'AI Assistant', items: employeeAI },
     ]
@@ -333,6 +345,7 @@ export function LaxreeSidebar() {
       { label: 'Task Management', items: taskMgmt },
       { label: 'Intelligence', items: intelligence },
       { label: 'Attendance', items: employeeAttendance },
+      { label: 'HR Report', items: employeeHrReport },
       { label: 'Salary', items: employeeSalarySlip },
       { label: 'Departments', items: [{ id: 'departments' as ActivePage, label: 'Departments', icon: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="3" width="8" height="8" rx="1" /><rect x="13" y="3" width="8" height="8" rx="1" /><rect x="3" y="13" width="8" height="8" rx="1" /><path d="M13 17h8M17 13v8" /></svg> }] },
       { label: 'Management', items: management },
