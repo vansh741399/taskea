@@ -159,11 +159,9 @@ function hrmsAttendanceToPunches(records: HrmsAttendanceRecord[]): PunchLike[] {
 //   If Overall Score < 7 → marked RED
 //
 // EXCEL EXPORT (WPS-Office-compatible):
-//   - Sheet 1: HR Report (main, with header banner + freeze top row)
-//   - Sheet 2: Employee Master (HRMS data: salary, joining, bank)
-//   - Sheet 3: Scoring Rules
-//   - Sheet 4: Location Summary
-//   - Sheet 5: Report Info
+//   - Sheet 1: HR Report (single sheet, clean header row + freeze top row)
+//   (Sheet 2 Employee Master, Sheet 3 Scoring Rules, Sheet 4 Location
+//    Summary, Sheet 5 Report Info — all removed per founder request)
 //   bookType: 'xlsx', standard OOXML — opens cleanly in MS Excel, WPS,
 //   LibreOffice, Google Sheets.
 // ════════════════════════════════════════════════════════════════════════
@@ -798,15 +796,16 @@ function computeEmployeeReport(
 }
 
 // ════════════════════════════════════════════════════════════════════════
-// EXCEL — Admin view (2 sheets, professional)
-// v25·0806-pro: Redesigned with ExcelJS for eye-catching, professional output.
-//   • Sheet 1: HR Report — branded header, color-coded score columns
-//   • Sheet 2: Employee Master — HRMS data (salary, bank, etc.)
+// EXCEL — Admin view (1 sheet, professional & minimal)
+// v25·0806-min: Trimmed per founder request.
+//   • Single sheet: "HR Report" — clean header row, color-coded scores
 //   Removed per founder request:
+//     - Banner title row (was appearing as unnecessary image-like header)
+//     - Sheet 2 (Employee Master)
 //     - Sheet 3 (Scoring Rules)
 //     - Sheet 4 (Location Summary)
 //     - Sheet 5 (Report Info)
-//     - Columns: Location, Firm, HRMS ID, Joining Date from Sheet 1
+//     - Columns: Location, Firm, HRMS ID, Joining Date from main sheet
 // ════════════════════════════════════════════════════════════════════════
 async function buildAdminExcelResponse(report: any[], filters: { month: number; year: number; location: string }) {
   const { month, year, location } = filters
@@ -845,11 +844,11 @@ async function buildAdminExcelResponse(report: any[], filters: { month: number; 
   wb.created = new Date()
 
   // ═══════════════════════════════════════════════════════════════════════
-  // SHEET 1: HR Report
+  // SHEET 1: HR Report (single sheet, clean tabular layout)
   // ═══════════════════════════════════════════════════════════════════════
   const ws1 = wb.addWorksheet('HR Report', {
     properties: { defaultRowHeight: 18 },
-    views: [{ showGridLines: false, ySplit: 4 }],
+    views: [{ showGridLines: false, ySplit: 1 }],
   })
 
   // Define columns (Location, Firm, HRMS ID, Joining Date removed per founder request)
@@ -872,36 +871,8 @@ async function buildAdminExcelResponse(report: any[], filters: { month: number; 
   ]
   ws1.columns = cols
 
-  // Row 1: spacer (thin)
-  ws1.addRow([])
-  ws1.getRow(1).height = 6
-
-  // Row 2: Title bar
-  const lastCol = cols.length
-  const lastColLetter = String.fromCharCode(64 + lastCol)
-  ws1.mergeCells(`A2:${lastColLetter}2`)
-  const t = ws1.getCell('A2')
-  t.value = 'LAXREE HR REPORT'
-  t.font = { name: 'Calibri', size: 18, bold: true, color: { argb: C.white } }
-  t.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: C.brandDark } }
-  t.alignment = { vertical: 'middle', horizontal: 'left', indent: 1 }
-  ws1.getRow(2).height = 32
-
-  // Row 3: subtitle (period + filter)
-  ws1.mergeCells(`A3:${lastColLetter}3`)
-  const s = ws1.getCell('A3')
-  s.value = `${monthLabel}  ·  Location: ${location === 'all' ? 'All Locations' : location}  ·  ${report.length} employees`
-  s.font = { name: 'Calibri', size: 11, bold: true, color: { argb: C.white } }
-  s.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: C.brandMid } }
-  s.alignment = { vertical: 'middle', horizontal: 'left', indent: 1 }
-  ws1.getRow(3).height = 22
-
-  // Row 4: spacer
-  ws1.addRow([])
-  ws1.getRow(4).height = 6
-
-  // Row 5: Header row
-  const hdrRow = ws1.getRow(5)
+  // Row 1: Header row (clean — no banner/title/spacer rows above it)
+  const hdrRow = ws1.getRow(1)
   hdrRow.height = 28
   cols.forEach((c, i) => {
     const cell = hdrRow.getCell(i + 1)
@@ -913,7 +884,7 @@ async function buildAdminExcelResponse(report: any[], filters: { month: number; 
   })
 
   // Data rows
-  let rowIdx = 6
+  let rowIdx = 2
   report.forEach((r, i) => {
     const isZebra = i % 2 === 1
     const rowBg = isZebra ? C.zebra : C.white
@@ -974,163 +945,13 @@ async function buildAdminExcelResponse(report: any[], filters: { month: number; 
     rowIdx++
   })
 
-  // Freeze the top 5 rows (title + subtitle + spacer + header)
-  ws1.views = [{ showGridLines: false, ySplit: 5 }]
+  // Freeze the header row
+  ws1.views = [{ showGridLines: false, ySplit: 1 }]
 
-  // Auto-filter on the header row (row 5)
+  // Auto-filter on the header row (row 1)
   ws1.autoFilter = {
-    from: { row: 5, column: 1 },
-    to: { row: 5, column: cols.length },
-  }
-
-  // ═══════════════════════════════════════════════════════════════════════
-  // SHEET 2: Employee Master (HRMS data)
-  // ═══════════════════════════════════════════════════════════════════════
-  const ws2 = wb.addWorksheet('Employee Master', {
-    properties: { defaultRowHeight: 18 },
-    views: [{ showGridLines: false, ySplit: 4 }],
-  })
-  const masterCols = [
-    { key: 'name',           header: 'Name',             width: 24 },
-    { key: 'hrmsId',         header: 'HRMS ID',          width: 12 },
-    { key: 'designation',    header: 'Designation',      width: 24 },
-    { key: 'department',     header: 'Department',       width: 14 },
-    { key: 'firm',           header: 'Firm',             width: 22 },
-    { key: 'location',       header: 'Location',         width: 14 },
-    { key: 'empType',        header: 'Employment Type',  width: 14 },
-    { key: 'salaryType',     header: 'Salary Type',      width: 12 },
-    { key: 'monthlySalary',  header: 'Monthly Salary',   width: 14 },
-    { key: 'dailyRate',      header: 'Daily Rate',       width: 12 },
-    { key: 'hourlyRate',     header: 'Hourly Rate',      width: 12 },
-    { key: 'overtimeRate',   header: 'Overtime Rate',    width: 12 },
-    { key: 'shiftStart',     header: 'Shift Start',      width: 10 },
-    { key: 'shiftEnd',       header: 'Shift End',        width: 10 },
-    { key: 'shiftHours',     header: 'Shift Hours',      width: 10 },
-    { key: 'gender',         header: 'Gender',           width: 10 },
-    { key: 'joiningDate',    header: 'Joining Date',     width: 14 },
-    { key: 'reportingMgr',   header: 'Reporting Mgr',    width: 20 },
-    { key: 'bankName',       header: 'Bank Name',        width: 18 },
-    { key: 'bankAccount',    header: 'Bank A/C',         width: 18 },
-    { key: 'bankIfsc',       header: 'IFSC',             width: 12 },
-    { key: 'pan',            header: 'PAN',              width: 14 },
-    { key: 'aadhaar',        header: 'Aadhaar',          width: 16 },
-    { key: 'pf',             header: 'PF Number',        width: 14 },
-    { key: 'esi',            header: 'ESI Number',       width: 14 },
-    { key: 'emergency',      header: 'Emergency Contact',width: 18 },
-    { key: 'hrmsStatus',     header: 'HRMS Status',      width: 10 },
-  ]
-  ws2.columns = masterCols
-
-  // ExcelJS column letter helper (handles >26 cols: e.g. col 27 → "AA")
-  const colLetter = (n: number) => {
-    let s = ''
-    while (n > 0) {
-      const rem = (n - 1) % 26
-      s = String.fromCharCode(65 + rem) + s
-      n = Math.floor((n - 1) / 26)
-    }
-    return s
-  }
-  const lastColLetter2 = colLetter(masterCols.length)
-
-  // Row 1: spacer
-  ws2.addRow([])
-  ws2.getRow(1).height = 6
-
-  // Row 2: Title
-  ws2.mergeCells(`A2:${lastColLetter2}2`)
-  const t2 = ws2.getCell('A2')
-  t2.value = 'EMPLOYEE MASTER (HRMS DATA)'
-  t2.font = { name: 'Calibri', size: 16, bold: true, color: { argb: C.white } }
-  t2.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: C.brandDark } }
-  t2.alignment = { vertical: 'middle', horizontal: 'left', indent: 1 }
-  ws2.getRow(2).height = 28
-
-  // Row 3: subtitle
-  ws2.mergeCells(`A3:${lastColLetter2}3`)
-  const s2 = ws2.getCell('A3')
-  s2.value = `${monthLabel}  ·  ${report.filter(r => r.hrms).length} employees with HRMS records`
-  s2.font = { name: 'Calibri', size: 11, bold: true, color: { argb: C.white } }
-  s2.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: C.brandMid } }
-  s2.alignment = { vertical: 'middle', horizontal: 'left', indent: 1 }
-  ws2.getRow(3).height = 20
-
-  // Row 4: spacer
-  ws2.addRow([])
-  ws2.getRow(4).height = 6
-
-  // Row 5: header
-  const hdrRow2 = ws2.getRow(5)
-  hdrRow2.height = 26
-  masterCols.forEach((c, i) => {
-    const cell = hdrRow2.getCell(i + 1)
-    cell.value = c.header
-    cell.font = fontHdr
-    cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: C.hdrBg } }
-    cell.alignment = alignCenter
-    cell.border = borderAll
-  })
-
-  // Data rows
-  let rowIdx2 = 6
-  report.filter(r => r.hrms).forEach((r, i) => {
-    const isZebra = i % 2 === 1
-    const rowBg = isZebra ? C.zebra : C.white
-    const h = r.hrms
-    const masterRow: any = {
-      name: r.name,
-      hrmsId: h.hrmsEmployeeId || '—',
-      designation: r.designation || '—',
-      department: r.department || '—',
-      firm: h.firm || '—',
-      location: r.location || '—',
-      empType: h.employmentType || '—',
-      salaryType: h.salaryType || '—',
-      monthlySalary: h.monthlySalary || '—',
-      dailyRate: h.dailyRate || '—',
-      hourlyRate: h.hourlyRate ? `₹${h.hourlyRate.toFixed(2)}` : '—',
-      overtimeRate: h.overtimeRate ? `₹${h.overtimeRate.toFixed(2)}` : '—',
-      shiftStart: h.shiftStart || '—',
-      shiftEnd: h.shiftEnd || '—',
-      shiftHours: h.shiftHours || '—',
-      gender: h.gender || '—',
-      joiningDate: h.joiningDate ? new Date(h.joiningDate).toLocaleDateString('en-IN') : '—',
-      reportingMgr: h.reportingManager || '—',
-      bankName: h.bankName || '—',
-      bankAccount: h.bankAccount || '—',
-      bankIfsc: h.bankIfsc || '—',
-      pan: h.panNumber || '—',
-      aadhaar: h.aadhaarNumber || '—',
-      pf: h.pfNumber || '—',
-      esi: h.esiNumber || '—',
-      emergency: h.emergencyContact || '—',
-      hrmsStatus: h.hrmsStatus || '—',
-    }
-    const dataRow = ws2.getRow(rowIdx2)
-    dataRow.values = masterRow
-    dataRow.height = 18
-    masterCols.forEach((c, ci) => {
-      const cell = dataRow.getCell(ci + 1)
-      cell.border = borderAll
-      cell.alignment = alignLeft
-      cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: rowBg } }
-      if (c.key === 'name') {
-        cell.font = fontValBold
-      } else if (c.key === 'monthlySalary' && h.monthlySalary) {
-        cell.font = { ...fontValBold, color: { argb: C.good } }
-        cell.value = `₹ ${Number(h.monthlySalary).toLocaleString('en-IN')}`
-      } else {
-        cell.font = fontVal
-      }
-    })
-    rowIdx2++
-  })
-
-  // Freeze + auto-filter
-  ws2.views = [{ showGridLines: false, ySplit: 5 }]
-  ws2.autoFilter = {
-    from: { row: 5, column: 1 },
-    to: { row: 5, column: masterCols.length },
+    from: { row: 1, column: 1 },
+    to: { row: 1, column: cols.length },
   }
 
   // ─── Write buffer & respond ────────────────────────────────────────────

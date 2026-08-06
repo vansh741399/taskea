@@ -83,7 +83,6 @@ export function LaxreeHrReport() {
 
   const summary = data?.summary
   const employees = data?.employees || []
-  const scoringConfig = data?.scoringConfig || {}
   const dataStatus = data?.dataStatus || 'ok'
   const punchCount = data?.punchCount ?? 0
   const hrmsLeavesMergedCount = data?.hrmsLeavesMergedCount ?? 0
@@ -94,7 +93,7 @@ export function LaxreeHrReport() {
       <div className="ph">
         <div className="ph-left">
           <h2>📊 HR Report</h2>
-          <p>Monthly attendance scoring · marking scheme · Excel export</p>
+          <p>Monthly attendance scoring · Excel export</p>
         </div>
         <div className="ph-right">
           <button
@@ -392,64 +391,6 @@ export function LaxreeHrReport() {
         </table>
       </div>
 
-      {/* Scoring Rules Panel — per uploaded image */}
-      <div style={{
-        background: 'linear-gradient(135deg, #fef3c7 0%, #fde68a 100%)',
-        borderRadius: 12,
-        padding: 16,
-        marginBottom: 16,
-        border: '2px solid #F59E0B',
-      }}>
-        <div style={{ fontWeight: 800, fontSize: 14, color: '#92400E', marginBottom: 12, display: 'flex', alignItems: 'center', gap: 8 }}>
-          📐 Marking Scheme & Deduction Rules (Score out of 10)
-        </div>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 12 }}>
-          <div style={{ background: '#fff', borderRadius: 8, padding: 12, border: '1px solid #FCD34D' }}>
-            <div style={{ fontWeight: 700, fontSize: 12, color: '#92400E', marginBottom: 8 }}>
-              ✅ Score Calculation (out of 10)
-            </div>
-            <div style={{ fontSize: 11, color: '#78350F', lineHeight: 1.6 }}>
-              <div><strong>Max Score:</strong> 10 (every employee starts at 10/10)</div>
-              <div><strong>Overall Score</strong> = 10 − Deductions</div>
-              <div><strong>Final score</strong> is clamped between 0 and 10</div>
-              <div style={{ marginTop: 6, fontSize: 10, color: '#DC2626' }}>
-                🔴 Score &lt; 7 → marked RED &nbsp;·&nbsp; ⚠ 7 = AVG &nbsp;·&nbsp; ✓ 8-10 = GOOD
-              </div>
-            </div>
-          </div>
-
-          <div style={{ background: '#fff', borderRadius: 8, padding: 12, border: '1px solid #FCD34D' }}>
-            <div style={{ fontWeight: 700, fontSize: 12, color: '#92400E', marginBottom: 8 }}>
-              ➖ −1 Deductions
-            </div>
-            <div style={{ fontSize: 11, color: '#78350F', lineHeight: 1.7 }}>
-              <div>• Leaves &gt; 2 in a month</div>
-              <div>• Late comings/Early goings &gt; 1</div>
-              <div>• Uninformed leaves &gt; 1</div>
-              <div>• Half Days &gt; 2 in a month</div>
-            </div>
-          </div>
-
-          <div style={{ background: '#fff', borderRadius: 8, padding: 12, border: '1px solid #FCD34D' }}>
-            <div style={{ fontWeight: 700, fontSize: 12, color: '#92400E', marginBottom: 8 }}>
-              ⚠️ −2 Deductions (severe)
-            </div>
-            <div style={{ fontSize: 11, color: '#78350F', lineHeight: 1.7 }}>
-              <div>• Leaves exceed 5 days</div>
-              <div>• Late comings exceed 4 in a month</div>
-              <div>• Uninformed leaves &gt; 3</div>
-              <div>• Half Days &gt; 4 in a month</div>
-            </div>
-          </div>
-        </div>
-
-        <div style={{ marginTop: 12, fontSize: 10, color: '#92400E', textAlign: 'center' }}>
-          📊 Shift: {scoringConfig.shiftStart || '10:00 AM'} – {scoringConfig.shiftEnd || '7:00 PM'} ·
-          Grace: {scoringConfig.lateGracePeriod || '15 min'} ·
-          Saturday + Sunday excluded from uninformed count
-        </div>
-      </div>
-
       <div style={{
         padding: 12,
         background: '#f3f4f6',
@@ -458,8 +399,7 @@ export function LaxreeHrReport() {
         color: '#6B7280',
         textAlign: 'center',
       }}>
-        📥 Excel export includes 5 sheets: HR Report, Employee Master, Scoring Rules, Location Summary, Report Info ·
-        Score is OUT OF 10 (start at 10, deductions applied per marking scheme)
+        📥 Excel export · Score is OUT OF 10 (start at 10, deductions applied per marking scheme)
       </div>
     </>
   )
