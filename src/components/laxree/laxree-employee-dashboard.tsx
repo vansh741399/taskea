@@ -6,7 +6,7 @@ import { useState } from 'react'
 import { LaxreeAttendancePanel } from './laxree-attendance-panel'
 import { LaxreeSalarySlipPanel } from './laxree-salary-slip-panel'
 import { LaxreePunchWidget } from './laxree-punch-widget'
-import { LaxreeHrReport } from './laxree-hr-report'
+import { LaxreeEmpHrReport } from './laxree-emp-hr-report'
 
 // Avatar colors
 const AVATAR_COLORS = ['#B45309', '#6D28D9', '#0F766E', '#1D4ED8', '#BE123C', '#15803D', '#C2410C', '#7C3AED']
@@ -44,7 +44,7 @@ export function LaxreeEmployeeDashboard() {
   const { data: taskActivityData } = useQuery<{ activities: any[]; count: number }>({
     queryKey: ['emp-task-activity-feed'],
     queryFn: () => fetch('/api/task-activity?limit=10').then(r => r.json()),
-    refetchInterval: 15000,
+    refetchInterval: 60000, // 60s — was 15s (too aggressive, caused slowdowns)
     refetchOnMount: 'always',
   })
   const taskActivities = Array.isArray(taskActivityData?.activities) ? taskActivityData.activities : []
@@ -60,7 +60,7 @@ export function LaxreeEmployeeDashboard() {
     enabled: !!currentUserId,
     refetchOnMount: 'always',
     staleTime: 0,
-    refetchInterval: 10000, // Auto-refresh every 10 seconds so employee sees status changes
+    refetchInterval: 60000, // 60s — was 10s (too aggressive, caused slowdowns). Employee can still click Refresh manually for instant update.
   })
 
   // Fetch employee's weekly score
@@ -805,9 +805,9 @@ export function LaxreeEmployeeDashboard() {
       )}
 
       {/* ===================== HR REPORT TAB (v25·0806) ===================== */}
-      {/* Monthly HR report with marking scheme — visible to employee for self-review */}
+      {/* Employee's PERSONAL HR report (self-view) — NOT the admin/founder report. */}
       {empTab === 'hr-report' && (
-        <LaxreeHrReport />
+        <LaxreeEmpHrReport />
       )}
 
       {/* ===================== RECENT ACTIVITY (always last — v24·0625-layout fix) ===================== */}

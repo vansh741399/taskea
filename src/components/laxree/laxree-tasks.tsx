@@ -52,11 +52,11 @@ export function LaxreeTasks({ showCancelled, showExtHold, showEscalations, assig
   })
 
   // ─── Recent Activity feed (persistent audit log of task events) ───────
-  // Polls every 15s so newly created/deleted/revised tasks show up quickly.
+  // Polls every 60s so newly created/deleted/revised tasks show up quickly.
   const { data: taskActivityData } = useQuery<{ activities: any[]; count: number }>({
     queryKey: ['task-activity-feed-tasks'],
     queryFn: () => fetch('/api/task-activity?limit=15').then(r => r.json()),
-    refetchInterval: 15000,
+    refetchInterval: 60000, // 60s — was 15s (too aggressive, caused slowdowns)
     refetchOnMount: 'always',
   })
   const taskActivities = Array.isArray(taskActivityData?.activities) ? taskActivityData.activities : []

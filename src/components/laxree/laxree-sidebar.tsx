@@ -49,7 +49,7 @@ export function LaxreeSidebar() {
     queryKey: ['ea-leaves-sidebar'],
     queryFn: () => fetch('/api/leaves?status=PENDING').then(r => r.json()),
     enabled: isAdmin || isEA || isFounder,
-    refetchInterval: 5000,
+    refetchInterval: 30000, // 30s — was 5s (too aggressive, caused dashboard slowdowns)
   })
   const eaPendingLeaves = (eaLeavesData as any)?.leaves?.length || 0
 

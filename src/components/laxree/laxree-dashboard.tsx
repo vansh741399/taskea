@@ -47,7 +47,7 @@ export function LaxreeDashboard({ assignedById, directorName, strictAssignedBy }
   const { data: eaLeavesData } = useQuery({
     queryKey: ['ea-dash-leaves'],
     queryFn: () => fetch('/api/leaves?status=PENDING').then(r => r.json()),
-    refetchInterval: 5000,
+    refetchInterval: 30000, // 30s — was 5s (too aggressive, caused dashboard slowdowns)
   })
   const pendingLeaves = Array.isArray((eaLeavesData as any)?.leaves) ? (eaLeavesData as any).leaves : []
   const pendingLeaveCount = pendingLeaves.length
@@ -60,11 +60,11 @@ export function LaxreeDashboard({ assignedById, directorName, strictAssignedBy }
 
   // ─── NEW: Persistent task activity feed (CREATED / DELETED / REVISED / COMPLETED / CANCELLED)
   // This is INDEPENDENT of the dashboard's `recentActivities` (which only tracks workflow
-  // status changes). We poll every 15s so the user sees new events almost immediately.
+  // status changes). We poll every 60s so the user sees new events almost immediately.
   const { data: taskActivityData } = useQuery<{ activities: any[]; count: number }>({
     queryKey: ['task-activity-feed'],
     queryFn: () => fetch('/api/task-activity?limit=20').then(r => r.json()),
-    refetchInterval: 15000,
+    refetchInterval: 60000, // 60s — was 15s (too aggressive, caused slowdowns)
     refetchOnMount: 'always',
   })
   const taskActivities = Array.isArray(taskActivityData?.activities) ? taskActivityData.activities : []

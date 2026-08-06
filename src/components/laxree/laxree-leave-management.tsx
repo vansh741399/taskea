@@ -28,7 +28,7 @@ export function LaxreeLeaveManagement() {
     },
     refetchOnMount: 'always',
     staleTime: 0,
-    refetchInterval: 5000,
+    refetchInterval: 30000, // 30s — was 5s (too aggressive, caused slowdowns)
   })
 
   // Fetch all employees for delegation view

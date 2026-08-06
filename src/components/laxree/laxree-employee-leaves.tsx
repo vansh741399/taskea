@@ -41,7 +41,7 @@ export function LaxreeEmployeeLeaves() {
     enabled: !!currentUserId,
     refetchOnMount: 'always',
     staleTime: 0,
-    refetchInterval: 10000, // Auto-refresh every 10 seconds so employee sees EA approval/rejection
+    refetchInterval: 60000, // 60s — was 10s (too aggressive, caused slowdowns). Employee can click Refresh for instant update.
   })
 
   // Parse leaves from response

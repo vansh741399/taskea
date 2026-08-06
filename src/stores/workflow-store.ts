@@ -210,8 +210,17 @@ export const useWorkflowStore = create<WorkflowStore>()(
       // v24·0625-refresh-fix: logout explicitly resets to initialState AND the
       // persist middleware will automatically sync this empty state to localStorage,
       // so the next refresh also lands on the login page (not the previous session).
+      //
+      // v25·0806-splash-on-logout-fix: CRITICAL — do NOT reset _hasHydrated here.
+      // The store is already hydrated (the user just logged out, they didn't
+      // refresh the page). If we set _hasHydrated=false, the page.tsx splash
+      // screen ("LAXREE" on cream background) renders for up to 1.5 seconds
+      // before the safety timeout kicks in. That was the root cause of the
+      // "blank LAXREE screen on sign-out" complaint. Keeping _hasHydrated=true
+      // means the page transitions instantly from dashboard → login page.
       logout: () => set({
         ...initialState,
+        _hasHydrated: true,
       }),
       setHasHydrated: (h: boolean) => set({ _hasHydrated: h }),
     }),

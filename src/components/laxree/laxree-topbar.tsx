@@ -10,7 +10,7 @@ export function LaxreeTopbar() {
   const { data: notifData } = useQuery({
     queryKey: ['topbar-notifs', currentUserId],
     queryFn: () => fetch(`/api/notifications?userId=${currentUserId}`).then(r => r.json()).catch(() => ({ notifications: [], unreadCount: 0 })),
-    refetchInterval: 5000, // Faster refresh — 5 seconds for real-time leave notifications
+    refetchInterval: 30000, // 30s — reasonable refresh, was 5s (too aggressive, caused slowdowns)
     enabled: !!currentUserId,
   })
   const unreadCount = notifData?.unreadCount || 0
