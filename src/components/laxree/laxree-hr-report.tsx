@@ -81,7 +81,6 @@ export function LaxreeHrReport() {
     }
   }
 
-  const summary = data?.summary
   const employees = data?.employees || []
   const dataStatus = data?.dataStatus || 'ok'
   const punchCount = data?.punchCount ?? 0
@@ -241,25 +240,6 @@ export function LaxreeHrReport() {
               </div>
             )}
           </div>
-        </div>
-      )}
-
-      {/* Summary Cards */}
-      {summary && (
-        <div style={{
-          display: 'grid',
-          gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))',
-          gap: 10,
-          marginBottom: 16,
-        }}>
-          <SummaryCard label="Employees" value={summary.totalEmployees} icon="👥" color="#6D28D9" />
-          <SummaryCard label="Total Presents" value={summary.totalPresents} icon="✅" color="#10B981" />
-          <SummaryCard label="Avg Score /10" value={summary.avgScore} icon="🎯" color="#F59E0B" />
-          <SummaryCard label="Low Score (<7)" value={summary.lowScoreCount} icon="🔴" color="#EF4444" />
-          <SummaryCard label="Full Day Leaves" value={summary.totalFullDayLeaves} icon="🏖️" color="#0EA5E9" />
-          <SummaryCard label="Half Days" value={summary.totalHalfDayLeaves} icon="🌗" color="#8B5CF6" />
-          <SummaryCard label="Uninformed" value={summary.totalUninformedLeaves} icon="⚠️" color="#F97316" />
-          <SummaryCard label="Late/Early" value={summary.totalLateEarly} icon="⏰" color="#06B6D4" />
         </div>
       )}
 
@@ -475,25 +455,3 @@ function CountBadge({ value, color, warn }: { value: number; color: string; warn
   )
 }
 
-function SummaryCard({ label, value, icon, color }: { label: string; value: any; icon: string; color: string }) {
-  return (
-    <div style={{
-      background: '#fff',
-      borderRadius: 10,
-      padding: 12,
-      border: '1px solid #e5e7eb',
-      borderLeft: `3px solid ${color}`,
-      boxShadow: '0 1px 3px rgba(0,0,0,0.05)',
-    }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
-        <span style={{ fontSize: 14 }}>{icon}</span>
-        <span style={{ fontSize: 9, fontWeight: 700, color: '#6B7280', textTransform: 'uppercase', letterSpacing: 0.5 }}>
-          {label}
-        </span>
-      </div>
-      <div style={{ fontSize: 20, fontWeight: 800, color: '#1f2937' }}>
-        {value}
-      </div>
-    </div>
-  )
-}
