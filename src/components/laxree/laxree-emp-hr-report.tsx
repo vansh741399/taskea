@@ -81,7 +81,6 @@ export function LaxreeEmpHrReport() {
   }
 
   const emp = data?.employee
-  const scoringConfig = data?.scoringConfig || {}
   const hrms = emp?.hrms || null
   const dataStatus = data?.dataStatus || 'ok'
   const punchCount = data?.punchCount ?? 0
@@ -444,46 +443,10 @@ export function LaxreeEmpHrReport() {
         </div>
       )}
 
-      {/* Scoring Rules Reference */}
-      <div style={{
-        background: 'linear-gradient(135deg, #fef3c7 0%, #fde68a 100%)',
-        borderRadius: 12, padding: 16, marginBottom: 16,
-        border: '2px solid #F59E0B',
-      }}>
-        <div style={{ fontWeight: 800, fontSize: 14, color: '#92400E', marginBottom: 12 }}>
-          📐 Marking Scheme (Score out of 10)
-        </div>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: 10 }}>
-          <div style={{ background: '#fff', borderRadius: 8, padding: 10, border: '1px solid #FCD34D' }}>
-            <div style={{ fontWeight: 700, fontSize: 11, color: '#92400E', marginBottom: 6 }}>✅ Score Calculation (out of 10)</div>
-            <div style={{ fontSize: 11, color: '#78350F', lineHeight: 1.6 }}>
-              Max = 10 (start at 10/10)
-              <br />Overall = 10 − Deductions
-              <br />🔴 &lt; {scoringConfig.lowScoreThreshold || 7} → RED · ⚠ 7 = AVG · ✓ 8-10 = GOOD
-            </div>
-          </div>
-          <div style={{ background: '#fff', borderRadius: 8, padding: 10, border: '1px solid #FCD34D' }}>
-            <div style={{ fontWeight: 700, fontSize: 11, color: '#92400E', marginBottom: 6 }}>➖ −1 Deductions</div>
-            <div style={{ fontSize: 11, color: '#78350F', lineHeight: 1.6 }}>
-              • Leaves &gt; 2<br />• Late/Early &gt; 1<br />• Uninformed &gt; 1<br />• Half Days &gt; 2
-            </div>
-          </div>
-          <div style={{ background: '#fff', borderRadius: 8, padding: 10, border: '1px solid #FCD34D' }}>
-            <div style={{ fontWeight: 700, fontSize: 11, color: '#92400E', marginBottom: 6 }}>⚠️ −2 Deductions</div>
-            <div style={{ fontSize: 11, color: '#78350F', lineHeight: 1.6 }}>
-              • Leaves &gt; 5<br />• Late/Early &gt; 4<br />• Uninformed &gt; 3<br />• Half Days &gt; 4
-            </div>
-          </div>
-        </div>
-        <div style={{ marginTop: 10, fontSize: 10, color: '#92400E', textAlign: 'center' }}>
-          Shift: {scoringConfig.shiftStart || '10:00 AM'} – {scoringConfig.shiftEnd || '7:00 PM'} · Grace: {scoringConfig.lateGracePeriod || '15 min'} · Sat + Sun excluded
-        </div>
-      </div>
-
       <div style={{
         padding: 12, background: '#f3f4f6', borderRadius: 8, fontSize: 11, color: '#6B7280', textAlign: 'center',
       }}>
-        📥 Excel export includes 4 sheets: My HR Summary, Late-Early Details, Uninformed Dates, Scoring Rules · Score is OUT OF 10 · Opens in MS Excel, WPS Office, LibreOffice
+        📥 Excel export includes 3 sheets: My HR Summary, Late-Early Details, Uninformed Dates · Score is OUT OF 10 · Opens in MS Excel, WPS Office, LibreOffice
       </div>
     </>
   )

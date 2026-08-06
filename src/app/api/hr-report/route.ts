@@ -15,6 +15,7 @@ import {
   type HrmsAttendanceRecord,
 } from '@/lib/hrms-db'
 import * as XLSX from 'xlsx'
+import ExcelJS from 'exceljs'
 
 // ════════════════════════════════════════════════════════════════════════
 // v25·0806-fix — IST TIMEZONE HELPERS (critical fix)
@@ -215,7 +216,7 @@ export async function GET(request: NextRequest) {
       // Build a self-only report
       const selfReport = await buildSelfReport(selfUserId, month, year)
       if (format === 'xlsx') {
-        return buildSelfExcelResponse(selfReport, month, year)
+        return await buildSelfExcelResponse(selfReport, month, year)
       }
       return NextResponse.json(selfReport)
     }
@@ -952,112 +953,439 @@ function buildAdminExcelResponse(report: any[], filters: { month: number; year: 
 }
 
 // ════════════════════════════════════════════════════════════════════════
-// EXCEL — Self view (employee's personal HR report, 3 sheets)
+// EXCEL — Self view (employee's personal HR report)
+// v25·0806-pro: Redesigned with ExcelJS for eye-catching, professional output.
+//   • Sheet 1: My HR Summary — branded header, identity block, attendance
+//               & score sections (NO SALARY section per founder request)
+//   • Sheet 2: Late-Early Details — color-coded table
+//   • Sheet 3: Uninformed Dates — clean table
+//   (Scoring Rules sheet removed per founder request)
 // ════════════════════════════════════════════════════════════════════════
-function buildSelfExcelResponse(selfReport: any, month: number, year: number) {
+async function buildSelfExcelResponse(selfReport: any, month: number, year: number) {
   const emp = selfReport.employee
-  const wb = XLSX.utils.book_new()
+  const monthLabel = new Date(year, month - 1, 1).toLocaleDateString('en-IN', { month: 'long', year: 'numeric' })
 
-  // Sheet 1: My HR Summary
-  const summaryData = [
-    { 'Field': 'Name', 'Value': emp.name },
-    { 'Field': 'Email', 'Value': emp.email },
-    { 'Field': 'Designation', 'Value': emp.designation },
-    { 'Field': 'Department', 'Value': emp.department },
-    { 'Field': 'Location', 'Value': emp.location },
-    { 'Field': 'HRMS Employee ID', 'Value': emp.hrms?.hrmsEmployeeId || '—' },
-    { 'Field': 'Firm', 'Value': emp.hrms?.firm || '—' },
-    { 'Field': 'Employment Type', 'Value': emp.hrms?.employmentType || '—' },
-    { 'Field': 'Joining Date', 'Value': emp.hrms?.joiningDate ? new Date(emp.hrms.joiningDate).toLocaleDateString('en-IN') : '—' },
-    { 'Field': 'Reporting Manager', 'Value': emp.hrms?.reportingManager || '—' },
-    {},
-    { 'Field': '── ATTENDANCE ──', 'Value': '' },
-    { 'Field': 'Month', 'Value': `${month}/${year}` },
-    { 'Field': 'Total Presents', 'Value': emp.totalPresents },
-    { 'Field': 'Full Day Leaves', 'Value': emp.fullDayLeaves },
-    { 'Field': 'Half Days', 'Value': emp.halfDayLeaves },
-    { 'Field': 'Uninformed Leaves', 'Value': emp.uninformedLeaves },
-    { 'Field': 'Late Comings', 'Value': emp.lateComings },
-    { 'Field': 'Early Goings', 'Value': emp.earlyGoings },
-    { 'Field': 'Late/Early Total', 'Value': emp.lateComingsEarlyGoings },
-    {},
-    { 'Field': '── SCORE (OUT OF 10) ──', 'Value': '' },
-    { 'Field': 'Starting Score (Max)', 'Value': emp.maxScore || 10 },
-    { 'Field': 'Deductions', 'Value': emp.deductions },
-    { 'Field': 'Overall Score (out of 10)', 'Value': emp.overallScore },
-    { 'Field': 'Status', 'Value': emp.status },
-    {},
-    { 'Field': '── SALARY ──', 'Value': '' },
-    { 'Field': 'Salary Type', 'Value': emp.hrms?.salaryType || '—' },
-    { 'Field': 'Monthly Salary', 'Value': emp.hrms?.monthlySalary || '—' },
-    { 'Field': 'Daily Rate', 'Value': emp.hrms?.dailyRate || '—' },
-    { 'Field': 'Hourly Rate', 'Value': emp.hrms?.hourlyRate || '—' },
-    { 'Field': 'Overtime Rate', 'Value': emp.hrms?.overtimeRate || '—' },
+  // ─── Color palette ─────────────────────────────────────────────────────
+  const C = {
+    brandDark:   'FF4C1D95',   // deep indigo (title bar)
+    brandMid:    'FF6D28D9',   // mid purple (sub-bar)
+    brandLight:  'FFEDE9FE',   // very light purple (zebra)
+    identityBg:  'FFF5F3FF',   // identity block bg
+    attendanceBg:'FFE0F2FE',   // light blue (attendance section bg)
+    attendanceHd:'FF0EA5E9',   // blue (attendance section header)
+    scoreBg:     'FFFEF3C7',   // light amber (score section bg)
+    scoreHd:     'FFD97706',   // amber (score section header)
+    good:        'FF059669',   // green
+    goodBg:      'FFD1FAE5',
+    warn:        'FFD97706',
+    warnBg:      'FFFEF3C7',
+    bad:         'FFDC2626',
+    badBg:       'FFFEE2E2',
+    textDark:    'FF1F2937',
+    textMuted:   'FF6B7280',
+    borderLight: 'FFE5E7EB',
+    white:       'FFFFFFFF',
+    zebra:       'FFF9FAFB',
+    lateRed:     'FFDC2626',
+    earlyBlue:   'FF0EA5E9',
+  }
+
+  // ─── Reusable style fragments ──────────────────────────────────────────
+  const thin = { style: 'thin' as const, color: { argb: C.borderLight } }
+  const borderAll = { top: thin, left: thin, bottom: thin, right: thin }
+  const fontHdr = { name: 'Calibri', size: 11, bold: true, color: { argb: C.white } }
+  const fontLabel = { name: 'Calibri', size: 10, bold: true, color: { argb: C.textMuted } }
+  const fontVal = { name: 'Calibri', size: 11, color: { argb: C.textDark } }
+  const fontValBold = { name: 'Calibri', size: 11, bold: true, color: { argb: C.textDark } }
+  const alignLeft = { vertical: 'middle' as const, horizontal: 'left' as const, indent: 1 }
+  const alignCenter = { vertical: 'middle' as const, horizontal: 'center' as const }
+
+  const wb = new ExcelJS.Workbook()
+  wb.creator = 'Laxree ERP'
+  wb.created = new Date()
+
+  // ═══════════════════════════════════════════════════════════════════════
+  // SHEET 1: My HR Summary
+  // ═══════════════════════════════════════════════════════════════════════
+  const ws1 = wb.addWorksheet('My HR Summary', {
+    properties: { defaultRowHeight: 20 },
+    views: [{ showGridLines: false }],
+  })
+  ws1.columns = [
+    { width: 4 },    // A: spacer
+    { width: 32 },   // B: label
+    { width: 36 },   // C: value
+    { width: 4 },    // D: spacer
   ]
-  const ws1 = XLSX.utils.json_to_sheet(summaryData)
-  ws1['!cols'] = [{ wch: 28 }, { wch: 30 }]
-  XLSX.utils.book_append_sheet(wb, ws1, 'My HR Summary')
 
-  // Sheet 2: Late / Early Details
-  const lateData = (emp.latePunchDetails || []).map((d: any, i: number) => ({
-    'S.No': i + 1,
-    'Type': 'LATE COMING',
-    'Date': d.date,
-    'Time': d.punchIn,
-    'Minutes Late': d.minutesLate,
-  })).concat(
-    (emp.earlyPunchDetails || []).map((d: any, i: number) => ({
-      'S.No': (emp.latePunchDetails?.length || 0) + i + 1,
-      'Type': 'EARLY GOING',
-      'Date': d.date,
-      'Time': d.punchOut,
-      'Minutes Early': d.minutesEarly,
-    }))
-  )
-  const ws2 = XLSX.utils.json_to_sheet(
-    lateData.length > 0 ? lateData : [{ 'S.No': 1, 'Type': '—', 'Date': '—', 'Time': '—', 'Note': 'No late/early records this month' }]
-  )
-  ws2['!cols'] = [{ wch: 6 }, { wch: 14 }, { wch: 22 }, { wch: 12 }, { wch: 14 }]
-  XLSX.utils.book_append_sheet(wb, ws2, 'Late-Early Details')
+  // Row 1: spacer (thin)
+  ws1.addRow([])
+  ws1.getRow(1).height = 8
 
-  // Sheet 3: Uninformed Leave Dates
-  const uninformedData = (emp.uninformedDates || []).map((d: string, i: number) => ({
-    'S.No': i + 1,
-    'Date': d,
-    'Status': 'Uninformed (no punch + no approved leave)',
+  // Row 2: Title bar — "MY HR REPORT" (merged B:C)
+  ws1.mergeCells('B2:C2')
+  const tCell = ws1.getCell('B2')
+  tCell.value = 'MY HR REPORT'
+  tCell.font = { name: 'Calibri', size: 22, bold: true, color: { argb: C.white } }
+  tCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: C.brandDark } }
+  tCell.alignment = { vertical: 'middle', horizontal: 'left', indent: 1 }
+  ws1.getRow(2).height = 40
+
+  // Row 3: Subtitle — employee name + period (merged B:C)
+  ws1.mergeCells('B3:C3')
+  const sCell = ws1.getCell('B3')
+  sCell.value = `${emp.name || '—'}  ·  ${monthLabel}`
+  sCell.font = { name: 'Calibri', size: 12, bold: true, color: { argb: C.white } }
+  sCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: C.brandMid } }
+  sCell.alignment = { vertical: 'middle', horizontal: 'left', indent: 1 }
+  ws1.getRow(3).height = 26
+
+  // Row 4: spacer
+  ws1.addRow([])
+  ws1.getRow(4).height = 8
+
+  // ─── IDENTITY BLOCK ────────────────────────────────────────────────────
+  // Row 5: section header "EMPLOYEE INFORMATION"
+  ws1.mergeCells('B5:C5')
+  const idHdr = ws1.getCell('B5')
+  idHdr.value = '👤  EMPLOYEE INFORMATION'
+  idHdr.font = { name: 'Calibri', size: 11, bold: true, color: { argb: C.brandDark } }
+  idHdr.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: C.brandLight } }
+  idHdr.alignment = { vertical: 'middle', horizontal: 'left', indent: 1 }
+  idHdr.border = borderAll
+  ws1.getCell('C5').border = borderAll
+  ws1.getRow(5).height = 24
+
+  const identityRows: [string, any][] = [
+    ['Full Name',         emp.name || '—'],
+    ['Designation',       emp.designation || '—'],
+    ['Department',        emp.department || '—'],
+    ['Location',          emp.location || '—'],
+    ['HRMS Employee ID',  emp.hrms?.hrmsEmployeeId || '—'],
+    ['Firm',              emp.hrms?.firm || '—'],
+    ['Employment Type',   emp.hrms?.employmentType || '—'],
+    ['Joining Date',      emp.hrms?.joiningDate ? new Date(emp.hrms.joiningDate).toLocaleDateString('en-IN') : '—'],
+    ['Reporting Manager', emp.hrms?.reportingManager || '—'],
+  ]
+  let r = 6
+  for (const [label, value] of identityRows) {
+    const bCell = ws1.getCell(`B${r}`)
+    const cCell = ws1.getCell(`C${r}`)
+    bCell.value = label
+    bCell.font = fontLabel
+    bCell.alignment = alignLeft
+    bCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: C.identityBg } }
+    bCell.border = borderAll
+    cCell.value = value ?? '—'
+    cCell.font = fontValBold
+    cCell.alignment = alignLeft
+    cCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: C.white } }
+    cCell.border = borderAll
+    ws1.getRow(r).height = 20
+    r++
+  }
+
+  // spacer
+  ws1.addRow([])
+  ws1.getRow(r).height = 8
+  r++
+
+  // ─── ATTENDANCE SECTION ────────────────────────────────────────────────
+  ws1.mergeCells(`B${r}:C${r}`)
+  const atHdr = ws1.getCell(`B${r}`)
+  atHdr.value = '✅  ATTENDANCE'
+  atHdr.font = fontHdr
+  atHdr.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: C.attendanceHd } }
+  atHdr.alignment = { vertical: 'middle', horizontal: 'left', indent: 1 }
+  atHdr.border = borderAll
+  ws1.getCell(`C${r}`).border = borderAll
+  ws1.getRow(r).height = 24
+  r++
+
+  const attendanceRows: [string, any, boolean?][] = [
+    ['Month',              `${monthLabel}`, false],
+    ['Total Presents',     emp.totalPresents, false],
+    ['Full Day Leaves',    emp.fullDayLeaves, emp.fullDayLeaves > 2],
+    ['Half Days',          emp.halfDayLeaves, emp.halfDayLeaves > 2],
+    ['Uninformed Leaves',  emp.uninformedLeaves, emp.uninformedLeaves > 1],
+    ['Late Comings',       emp.lateComings, emp.lateComings > 1],
+    ['Early Goings',       emp.earlyGoings, emp.earlyGoings > 1],
+    ['Late/Early Total',   emp.lateComingsEarlyGoings, false],
+  ]
+  for (const [label, value, warn] of attendanceRows) {
+    const bCell = ws1.getCell(`B${r}`)
+    const cCell = ws1.getCell(`C${r}`)
+    bCell.value = label
+    bCell.font = fontLabel
+    bCell.alignment = alignLeft
+    bCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: C.attendanceBg } }
+    bCell.border = borderAll
+    cCell.value = value ?? '—'
+    cCell.font = warn ? { ...fontValBold, color: { argb: C.bad } } : fontValBold
+    cCell.alignment = alignLeft
+    cCell.fill = { type: 'pattern', pattern: 'solid', fgColor: warn ? { argb: C.badBg } : { argb: C.white } }
+    cCell.border = borderAll
+    ws1.getRow(r).height = 20
+    r++
+  }
+
+  // spacer
+  ws1.addRow([])
+  ws1.getRow(r).height = 8
+  r++
+
+  // ─── SCORE (OUT OF 10) SECTION ─────────────────────────────────────────
+  ws1.mergeCells(`B${r}:C${r}`)
+  const scHdr = ws1.getCell(`B${r}`)
+  scHdr.value = '🎯  SCORE (OUT OF 10)'
+  scHdr.font = fontHdr
+  scHdr.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: C.scoreHd } }
+  scHdr.alignment = { vertical: 'middle', horizontal: 'left', indent: 1 }
+  scHdr.border = borderAll
+  ws1.getCell(`C${r}`).border = borderAll
+  ws1.getRow(r).height = 24
+  r++
+
+  const scoreRows: [string, any][] = [
+    ['Starting Score (Max)', emp.maxScore || 10],
+    ['Deductions', `− ${emp.deductions}`],
+    ['Overall Score (out of 10)', `${emp.overallScore} / 10`],
+    ['Status', emp.status],
+  ]
+  for (const [label, value] of scoreRows) {
+    const bCell = ws1.getCell(`B${r}`)
+    const cCell = ws1.getCell(`C${r}`)
+    bCell.value = label
+    bCell.font = fontLabel
+    bCell.alignment = alignLeft
+    bCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: C.scoreBg } }
+    bCell.border = borderAll
+
+    cCell.value = value ?? '—'
+    cCell.alignment = alignLeft
+
+    // Highlight overall score row specially
+    if (label === 'Overall Score (out of 10)') {
+      const isLow = emp.isLowScore
+      const isAvg = !isLow && emp.overallScore < 8
+      const color = isLow ? C.bad : isAvg ? C.warn : C.good
+      const bg    = isLow ? C.badBg : isAvg ? C.warnBg : C.goodBg
+      cCell.font = { name: 'Calibri', size: 14, bold: true, color: { argb: color } }
+      cCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: bg } }
+      ws1.getRow(r).height = 26
+    } else if (label === 'Status') {
+      const isLow = emp.isLowScore
+      const isAvg = !isLow && emp.overallScore < 8
+      const color = isLow ? C.bad : isAvg ? C.warn : C.good
+      cCell.font = { ...fontValBold, color: { argb: color } }
+      cCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: C.white } }
+      ws1.getRow(r).height = 20
+    } else {
+      cCell.font = fontValBold
+      cCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: C.white } }
+      ws1.getRow(r).height = 20
+    }
+    cCell.border = borderAll
+    r++
+  }
+
+  // spacer + footer
+  ws1.addRow([])
+  ws1.getRow(r).height = 8
+  r++
+  ws1.mergeCells(`B${r}:C${r}`)
+  const foot = ws1.getCell(`B${r}`)
+  foot.value = `Generated on ${new Date().toLocaleString('en-IN')} · Laxree ERP · HRMS-synced`
+  foot.font = { name: 'Calibri', size: 9, italic: true, color: { argb: C.textMuted } }
+  foot.alignment = { vertical: 'middle', horizontal: 'center' }
+  ws1.getRow(r).height = 18
+
+  // Freeze title rows
+  ws1.views = [{ showGridLines: false, ySplit: 4 }]
+
+  // ═══════════════════════════════════════════════════════════════════════
+  // SHEET 2: Late-Early Details
+  // ═══════════════════════════════════════════════════════════════════════
+  const ws2 = wb.addWorksheet('Late-Early Details', {
+    properties: { defaultRowHeight: 20 },
+    views: [{ showGridLines: false, ySplit: 3 }],
+  })
+  ws2.columns = [
+    { width: 4 },   // A spacer
+    { width: 8 },   // B S.No
+    { width: 16 },  // C Type
+    { width: 16 },  // D Date
+    { width: 14 },  // E Time
+    { width: 16 },  // F Minutes
+    { width: 4 },   // G spacer
+  ]
+
+  // Title
+  ws2.mergeCells('B2:F2')
+  const t2 = ws2.getCell('B2')
+  t2.value = 'LATE COMINGS & EARLY GOINGS'
+  t2.font = { name: 'Calibri', size: 16, bold: true, color: { argb: C.white } }
+  t2.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: C.brandDark } }
+  t2.alignment = { vertical: 'middle', horizontal: 'left', indent: 1 }
+  ws2.getRow(2).height = 32
+
+  ws2.mergeCells('B3:F3')
+  const s2 = ws2.getCell('B3')
+  s2.value = `${emp.name}  ·  ${monthLabel}`
+  s2.font = { name: 'Calibri', size: 11, bold: true, color: { argb: C.white } }
+  s2.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: C.brandMid } }
+  s2.alignment = { vertical: 'middle', horizontal: 'left', indent: 1 }
+  ws2.getRow(3).height = 20
+
+  // Header row
+  const hdrs = ['#', 'Type', 'Date', 'Time', 'Minutes']
+  const hdrRow = ws2.getRow(5)
+  hdrs.forEach((h, i) => {
+    const cell = hdrRow.getCell(i + 2) // start at col B
+    cell.value = h
+    cell.font = fontHdr
+    cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: C.brandMid } }
+    cell.alignment = alignCenter
+    cell.border = borderAll
+  })
+  ws2.getRow(5).height = 24
+
+  const lateList = (emp.latePunchDetails || []).map((d: any, i: number) => ({
+    sno: i + 1,
+    type: 'LATE COMING',
+    date: d.date,
+    time: d.punchIn,
+    minutes: `+${d.minutesLate} min`,
+    color: C.lateRed,
+    bg: C.badBg,
   }))
-  const ws3 = XLSX.utils.json_to_sheet(
-    uninformedData.length > 0 ? uninformedData : [{ 'S.No': 1, 'Date': '—', 'Status': 'No uninformed leaves this month' }]
-  )
-  ws3['!cols'] = [{ wch: 6 }, { wch: 22 }, { wch: 50 }]
-  XLSX.utils.book_append_sheet(wb, ws3, 'Uninformed Dates')
+  const earlyList = (emp.earlyPunchDetails || []).map((d: any, i: number) => ({
+    sno: lateList.length + i + 1,
+    type: 'EARLY GOING',
+    date: d.date,
+    time: d.punchOut,
+    minutes: `−${d.minutesEarly} min`,
+    color: C.earlyBlue,
+    bg: C.attendanceBg,
+  }))
+  const allRows = [...lateList, ...earlyList]
 
-  // Sheet 4: Scoring Rules (out of 10)
-  const rulesData = [
-    { 'Rule': 'Max Score', 'Value': MAX_SCORE, 'Description': 'Score is OUT OF 10. Starts at 10, deductions applied per marking scheme.' },
-    { 'Rule': 'Base Score', 'Value': MAX_SCORE, 'Description': 'Every employee starts the month at 10/10' },
-    { 'Rule': 'Late Coming Threshold', 'Value': `${SHIFT_START_HOUR}:${String(LATE_THRESHOLD_MINUTES).padStart(2,'0')} AM`, 'Description': 'Punch-in after this time = late' },
-    { 'Rule': 'Early Going Threshold', 'Value': `${SHIFT_END_HOUR}:00 PM`, 'Description': 'Punch-out before this time = early' },
-    { 'Rule': 'Low Score Threshold', 'Value': 7, 'Description': 'Scores below 7 are marked RED' },
-    { 'Rule': 'Score Formula', 'Value': '10 − Deductions', 'Description': 'Final score clamped between 0 and 10' },
-    {},
-    { 'Rule': '−1 Deductions', 'Value': '', 'Description': '' },
-    { 'Rule': 'Leaves > 2', 'Value': -1, 'Description': 'If total leave days > 2 in a month' },
-    { 'Rule': 'Late/Early > 1', 'Value': -1, 'Description': 'If late comings + early goings > 1' },
-    { 'Rule': 'Uninformed > 1', 'Value': -1, 'Description': 'If uninformed leaves > 1' },
-    { 'Rule': 'Half Days > 2', 'Value': -1, 'Description': 'If half day leaves > 2' },
-    {},
-    { 'Rule': '−2 Deductions (severe)', 'Value': '', 'Description': '' },
-    { 'Rule': 'Leaves > 5', 'Value': -2, 'Description': 'If total leave days > 5' },
-    { 'Rule': 'Late/Early > 4', 'Value': -2, 'Description': 'If late comings + early goings > 4' },
-    { 'Rule': 'Uninformed > 3', 'Value': -2, 'Description': 'If uninformed leaves > 3' },
-    { 'Rule': 'Half Days > 4', 'Value': -2, 'Description': 'If half day leaves > 4' },
+  if (allRows.length === 0) {
+    ws2.mergeCells('B6:F6')
+    const empty = ws2.getCell('B6')
+    empty.value = '✓  No late comings or early goings this month — perfect attendance!'
+    empty.font = { name: 'Calibri', size: 11, bold: true, color: { argb: C.good } }
+    empty.alignment = { vertical: 'middle', horizontal: 'center' }
+    empty.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: C.goodBg } }
+    empty.border = borderAll
+    ws2.getRow(6).height = 30
+  } else {
+    let rowIdx = 6
+    allRows.forEach((row, i) => {
+      const isZebra = i % 2 === 1
+      const rowBg = isZebra ? C.zebra : C.white
+      const dataRow = ws2.getRow(rowIdx)
+      const cells = [
+        { v: row.sno,    f: { ...fontValBold, color: { argb: C.textMuted } }, bg: rowBg, a: alignCenter },
+        { v: row.type,   f: { ...fontValBold, color: { argb: row.color } },   bg: row.bg, a: alignCenter },
+        { v: row.date,   f: fontVal,                                          bg: rowBg, a: alignCenter },
+        { v: row.time,   f: fontVal,                                          bg: rowBg, a: alignCenter },
+        { v: row.minutes, f: { ...fontValBold, color: { argb: row.color } },  bg: rowBg, a: alignCenter },
+      ]
+      cells.forEach((c, ci) => {
+        const cell = dataRow.getCell(ci + 2)
+        cell.value = c.v
+        cell.font = c.f
+        cell.alignment = c.a
+        cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: c.bg } }
+        cell.border = borderAll
+      })
+      ws2.getRow(rowIdx).height = 20
+      rowIdx++
+    })
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════
+  // SHEET 3: Uninformed Dates
+  // ═══════════════════════════════════════════════════════════════════════
+  const ws3 = wb.addWorksheet('Uninformed Dates', {
+    properties: { defaultRowHeight: 20 },
+    views: [{ showGridLines: false, ySplit: 3 }],
+  })
+  ws3.columns = [
+    { width: 4 },   // A spacer
+    { width: 8 },   // B S.No
+    { width: 22 },  // C Date
+    { width: 56 },  // D Status
+    { width: 4 },   // E spacer
   ]
-  const ws4 = XLSX.utils.json_to_sheet(rulesData)
-  ws4['!cols'] = [{ wch: 28 }, { wch: 18 }, { wch: 50 }]
-  XLSX.utils.book_append_sheet(wb, ws4, 'Scoring Rules')
 
-  const buf = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' })
+  // Title
+  ws3.mergeCells('B2:D2')
+  const t3 = ws3.getCell('B2')
+  t3.value = 'UNINFORMED LEAVE DATES'
+  t3.font = { name: 'Calibri', size: 16, bold: true, color: { argb: C.white } }
+  t3.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: C.brandDark } }
+  t3.alignment = { vertical: 'middle', horizontal: 'left', indent: 1 }
+  ws3.getRow(2).height = 32
+
+  ws3.mergeCells('B3:D3')
+  const s3 = ws3.getCell('B3')
+  s3.value = `${emp.name}  ·  ${monthLabel}`
+  s3.font = { name: 'Calibri', size: 11, bold: true, color: { argb: C.white } }
+  s3.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: C.brandMid } }
+  s3.alignment = { vertical: 'middle', horizontal: 'left', indent: 1 }
+  ws3.getRow(3).height = 20
+
+  // Header
+  const hdrs3 = ['#', 'Date', 'Status']
+  const hdrRow3 = ws3.getRow(5)
+  hdrs3.forEach((h, i) => {
+    const cell = hdrRow3.getCell(i + 2)
+    cell.value = h
+    cell.font = fontHdr
+    cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: C.brandMid } }
+    cell.alignment = alignCenter
+    cell.border = borderAll
+  })
+  ws3.getRow(5).height = 24
+
+  const uninfList = emp.uninformedDates || []
+  if (uninfList.length === 0) {
+    ws3.mergeCells('B6:D6')
+    const empty = ws3.getCell('B6')
+    empty.value = '✓  No uninformed leaves this month'
+    empty.font = { name: 'Calibri', size: 11, bold: true, color: { argb: C.good } }
+    empty.alignment = { vertical: 'middle', horizontal: 'center' }
+    empty.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: C.goodBg } }
+    empty.border = borderAll
+    ws3.getRow(6).height = 30
+  } else {
+    let rowIdx = 6
+    uninfList.forEach((d: string, i: number) => {
+      const isZebra = i % 2 === 1
+      const rowBg = isZebra ? C.zebra : C.white
+      const dataRow = ws3.getRow(rowIdx)
+      const cells = [
+        { v: i + 1, f: { ...fontValBold, color: { argb: C.textMuted } }, bg: rowBg },
+        { v: d,     f: fontValBold,                                       bg: rowBg },
+        { v: 'Uninformed (no punch + no approved leave)', f: { ...fontVal, color: { argb: C.bad } }, bg: rowBg },
+      ]
+      cells.forEach((c, ci) => {
+        const cell = dataRow.getCell(ci + 2)
+        cell.value = c.v
+        cell.font = c.f
+        cell.alignment = alignCenter
+        cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: c.bg } }
+        cell.border = borderAll
+      })
+      ws3.getRow(rowIdx).height = 20
+      rowIdx++
+    })
+  }
+
+  // ─── Write buffer & respond ────────────────────────────────────────────
+  const buf = await wb.xlsx.writeBuffer()
   const filename = `My_HR_Report_${year}_${String(month).padStart(2, '0')}.xlsx`
   return new NextResponse(buf, {
     status: 200,
