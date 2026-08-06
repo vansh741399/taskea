@@ -84,6 +84,9 @@ export function LaxreeHrReport() {
   const summary = data?.summary
   const employees = data?.employees || []
   const scoringConfig = data?.scoringConfig || {}
+  const dataStatus = data?.dataStatus || 'ok'
+  const punchCount = data?.punchCount ?? 0
+  const hrmsLeavesMergedCount = data?.hrmsLeavesMergedCount ?? 0
 
   return (
     <>
@@ -172,6 +175,42 @@ export function LaxreeHrReport() {
           {MONTHS.find(m => m.value === month)?.label} {year} · {location === 'all' ? 'All Locations' : location}
         </div>
       </div>
+
+      {/* v25·0806-fix: data status banner — explains why reports for months
+          before Aug 2026 show all zeros (ERP punch feature launched 1 Aug 2026) */}
+      {dataStatus !== 'ok' && (
+        <div style={{
+          background: dataStatus === 'no-erp-punches-leaves-only'
+            ? 'linear-gradient(135deg, #FEF3C7 0%, #FDE68A 100%)'
+            : 'linear-gradient(135deg, #FEE2E2 0%, #FECACA 100%)',
+          borderRadius: 10, padding: 14, marginBottom: 16,
+          border: `2px solid ${dataStatus === 'no-erp-punches-leaves-only' ? '#F59E0B' : '#EF4444'}`,
+          display: 'flex', gap: 12, alignItems: 'flex-start',
+        }}>
+          <div style={{ fontSize: 22 }}>
+            {dataStatus === 'no-erp-punches-leaves-only' ? 'ℹ️' : '⚠️'}
+          </div>
+          <div style={{ fontSize: 12, color: '#1f2937', lineHeight: 1.6, flex: 1 }}>
+            <div style={{ fontWeight: 800, marginBottom: 4, fontSize: 13 }}>
+              No ERP punch records for {MONTHS.find(m => m.value === month)?.label} {year}
+            </div>
+            {dataStatus === 'no-erp-punches-leaves-only' ? (
+              <div>
+                The ERP punch-in feature was launched on 1 Aug 2026. Before that date, attendance was
+                tracked in HRMS only. This report has merged <strong>{hrmsLeavesMergedCount}</strong> approved
+                leave record(s) from HRMS, but punch counts will be 0 for everyone. Switch to Aug 2026
+                or later for full punch data.
+              </div>
+            ) : (
+              <div>
+                The ERP punch-in feature was launched on 1 Aug 2026 — no punch or leave data exists
+                for this month in either ERP or HRMS. All attendance numbers will be 0. Switch to
+                Aug 2026 or later to see punch data.
+              </div>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Summary Cards */}
       {summary && (

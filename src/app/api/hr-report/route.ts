@@ -2,11 +2,79 @@ import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import {
   fetchHrmsEmployees,
+  fetchHrmsLeaves,
   findHrmsEmployeeByHrmsId,
   findHrmsEmployeeByName,
   type HrmsEmployee,
+  type HrmsLeave,
 } from '@/lib/hrms-client'
 import * as XLSX from 'xlsx'
+
+// ════════════════════════════════════════════════════════════════════════
+// v25·0806-fix — IST TIMEZONE HELPERS (critical fix)
+// ════════════════════════════════════════════════════════════════════════
+// Vercel serverless functions run in UTC. The previous version of this route
+// used getHours()/getMinutes()/toDateString()/getDay() — which all return
+// values in the SERVER's local timezone (UTC on Vercel). But the shift is
+// in IST (UTC+5:30). This caused:
+//   • Punch at 10:30 AM IST = 05:00 UTC → getHours() returns 5
+//     5 > 10 is false → never marked late (BROKEN)
+//   • Punch at 09:00 AM IST on Aug 6 = Aug 5 23:30 UTC → toDateString()
+//     returns "Tue Aug 05 2026" → counted as present on wrong day
+//     → marked UNINFORMED on Aug 6 even though user punched (BROKEN)
+//   • Day-of-week check used UTC day, so Sundays in IST were sometimes
+//     detected as Saturdays (BROKEN)
+//
+// FIX: All date operations now go through these IST helpers. They compute
+// the IST components by adding 5:30 to the UTC milliseconds, then reading
+// the UTC-* getters on the shifted Date (which gives us IST values).
+// ════════════════════════════════════════════════════════════════════════
+const IST_OFFSET_MS = (5 * 60 + 30) * 60 * 1000 // IST = UTC + 5:30
+
+interface IstParts {
+  year: number
+  month: number   // 1-12
+  day: number     // 1-31
+  hour: number    // 0-23
+  minute: number  // 0-59
+  dayOfWeek: number // 0=Sun, 6=Sat
+  dateStr: string // "YYYY-MM-DD" — sortable, comparable
+}
+
+function getIstParts(date: Date): IstParts {
+  // Shift the timestamp forward by IST offset, then read UTC getters.
+  // This gives us the IST civil-time components regardless of server tz.
+  const ist = new Date(date.getTime() + IST_OFFSET_MS)
+  const y = ist.getUTCFullYear()
+  const m = ist.getUTCMonth() + 1
+  const d = ist.getUTCDate()
+  return {
+    year: y,
+    month: m,
+    day: d,
+    hour: ist.getUTCHours(),
+    minute: ist.getUTCMinutes(),
+    dayOfWeek: ist.getUTCDay(),
+    dateStr: `${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`,
+  }
+}
+
+function istDateString(ts: Date | string): string {
+  return getIstParts(new Date(ts)).dateStr
+}
+
+/**
+ * Build a UTC Date range that exactly covers one IST calendar month.
+ *   month=7, year=2026  →  start = Jul 1 00:00 IST = Jun 30 18:30 UTC
+ *                          end   = Jul 31 23:59:59.999 IST = Jul 31 18:29:59.999 UTC
+ * Punches stored as UTC ISO strings will be correctly filtered.
+ */
+function istMonthRange(year: number, month: number): { start: Date; end: Date } {
+  const startUtcMs = Date.UTC(year, month - 1, 1) - IST_OFFSET_MS
+  const nextMonthStartUtcMs = Date.UTC(year, month, 1) - IST_OFFSET_MS
+  const endUtcMs = nextMonthStartUtcMs - 1
+  return { start: new Date(startUtcMs), end: new Date(endUtcMs) }
+}
 
 // ════════════════════════════════════════════════════════════════════════
 // v25·0806 — HR REPORT (self + admin modes, HRMS-enriched)
@@ -45,9 +113,14 @@ import * as XLSX from 'xlsx'
 // ════════════════════════════════════════════════════════════════════════
 
 const HR_SCORE_MULTIPLIER = 2
-const SHIFT_START_HOUR = 10 // 10:00 AM
-const SHIFT_END_HOUR = 19   // 7:00 PM
+const SHIFT_START_HOUR = 10 // 10:00 AM IST
+const SHIFT_END_HOUR = 19   // 7:00 PM IST
 const LATE_THRESHOLD_MINUTES = 15 // 15 min grace period
+// In minutes since IST midnight — used for precise late/early comparison
+const SHIFT_START_MIN = SHIFT_START_HOUR * 60                 // 600 (10:00 AM)
+const LATE_THRESHOLD_MIN = SHIFT_START_HOUR * 60 + LATE_THRESHOLD_MINUTES // 615 (10:15 AM)
+const SHIFT_END_MIN = SHIFT_END_HOUR * 60                     // 1140 (7:00 PM)
+const WEEKEND_DAYS = new Set([0, 6]) // 0=Sunday, 6=Saturday — both skipped in uninformed count
 
 export async function GET(request: NextRequest) {
   try {
@@ -91,8 +164,11 @@ export async function GET(request: NextRequest) {
     }
 
     // ─── ADMIN VIEW (all employees) ───
-    const startDate = new Date(Date.UTC(year, month - 1, 1))
-    const endDate = new Date(Date.UTC(year, month, 0, 23, 59, 59, 999))
+    // v25·0806-fix: use IST month range so punches near month boundaries
+    // (e.g. Aug 1 02:00 IST = Jul 31 20:30 UTC) are assigned to the
+    // correct IST month. Previously a UTC range caused last-month punches
+    // to be excluded and next-month punches to be included.
+    const { start: startDate, end: endDate } = istMonthRange(year, month)
     const daysInMonth = new Date(year, month, 0).getDate()
 
     // Build user filter
@@ -118,7 +194,7 @@ export async function GET(request: NextRequest) {
 
     const userIds = users.map(u => u.id)
 
-    // 2. Fetch punch records for the month
+    // 2. Fetch punch records for the month (IST range)
     const punches = await db.punchRecord.findMany({
       where: {
         userId: { in: userIds },
@@ -128,8 +204,8 @@ export async function GET(request: NextRequest) {
       orderBy: { punchIn: 'asc' },
     })
 
-    // 3. Fetch leaves for the month
-    const leaves = await db.leave.findMany({
+    // 3. Fetch ERP leaves for the month
+    const erpLeaves = await db.leave.findMany({
       where: {
         userId: { in: userIds },
         OR: [
@@ -144,8 +220,53 @@ export async function GET(request: NextRequest) {
       },
     })
 
-    // 4. Fetch HRMS employee master data (one bulk call, cached 5 min)
+    // v25·0806-fix: ALSO fetch HRMS leaves (read-only GET) and merge.
+    // Rationale: the ERP punch feature was added on 2026-08-01, so previous
+    // months have NO ERP punch/leave data. HRMS may have leave history for
+    // those months. Fetching HRMS leaves is purely additive — never deletes
+    // or modifies ERP leaves. We only ADD leaves that aren't already in ERP.
+    //
+    // NOTE: hrmsEmployees is fetched first (line below) so we can match
+    // HRMS leaves to ERP users by name/hrmsId.
     const hrmsEmployees = await fetchHrmsEmployees()
+
+    const hrmsLeavesAll = await fetchHrmsLeaves()
+    // Build a set of (userId + fromDateStr) keys for ERP leaves to dedupe
+    const erpLeaveKeys = new Set<string>()
+    for (const l of erpLeaves) {
+      erpLeaveKeys.add(`${l.userId}|${istDateString(l.fromDate)}`)
+    }
+    // Match HRMS leaves to ERP users by name (HRMS leaves don't have ERP userId)
+    const hrmsLeavesMerged: LeaveLike[] = []
+    for (const hl of hrmsLeavesAll) {
+      if (hl.status !== 'approved') continue
+      // Skip if outside the selected IST month
+      const fromIst = istDateString(hl.startDate)
+      const toIst = istDateString(hl.endDate)
+      const monthStartStr = `${year}-${String(month).padStart(2, '0')}-01`
+      const monthEndStr = `${year}-${String(month).padStart(2, '0')}-${String(daysInMonth).padStart(2, '0')}`
+      if (toIst < monthStartStr || fromIst > monthEndStr) continue
+      // Find matching ERP user by HRMS employee name
+      const matchedUser = users.find(u => {
+        const hrmsEmp = findHrmsEmployeeByHrmsId(hrmsEmployees, u.hrmsId) ||
+          findHrmsEmployeeByName(hrmsEmployees, u.name)
+        return hrmsEmp && (hrmsEmp.fullName === hl.employee?.fullName ||
+          hrmsEmp.employeeId === hl.employeeId)
+      })
+      if (!matchedUser) continue
+      const key = `${matchedUser.id}|${fromIst}`
+      if (erpLeaveKeys.has(key)) continue // already in ERP, skip duplicate
+      hrmsLeavesMerged.push({
+        userId: matchedUser.id,
+        leaveType: hl.type || 'CASUAL',
+        fromDate: new Date(hl.startDate),
+        toDate: new Date(hl.endDate),
+        status: 'APPROVED',
+        totalDays: hl.days,
+        reason: hl.reason,
+      })
+    }
+    const leaves = [...erpLeaves, ...hrmsLeavesMerged]
 
     // 5. Compute stats per user
     const report = users.map((user, index) => {
@@ -169,12 +290,22 @@ export async function GET(request: NextRequest) {
       generatedAt: new Date().toISOString(),
       filters: { month, year, location },
       mode: 'admin',
+      timezone: 'Asia/Kolkata (IST, UTC+5:30)',
+      // v25·0806-fix: dataStatus tells the frontend whether ERP punch data
+      // exists for the selected month. The ERP punch feature was added on
+      // 2026-08-01, so previous months will show 'no-erp-punches' — the
+      // frontend can display a banner telling the user that only HRMS
+      // leave data is shown for that month.
+      dataStatus: punches.length === 0
+        ? (hrmsLeavesMerged.length > 0 ? 'no-erp-punches-leaves-only' : 'no-erp-punches')
+        : 'ok',
       scoringConfig: {
         hrScoreMultiplier: HR_SCORE_MULTIPLIER,
-        shiftStart: `${SHIFT_START_HOUR}:00 AM`,
-        shiftEnd: `${SHIFT_END_HOUR}:00 PM`,
+        shiftStart: `${SHIFT_START_HOUR}:00 AM IST`,
+        shiftEnd: `${SHIFT_END_HOUR}:00 PM IST`,
         lateGracePeriod: `${LATE_THRESHOLD_MINUTES} min`,
         lowScoreThreshold: 7,
+        weekend: 'Saturday + Sunday excluded',
       },
       summary: {
         totalEmployees: report.length,
@@ -191,6 +322,8 @@ export async function GET(request: NextRequest) {
       employees: report,
       hrmsSyncedAt: hrmsEmployees.length > 0 ? new Date().toISOString() : null,
       hrmsEmployeeCount: hrmsEmployees.length,
+      hrmsLeavesMergedCount: hrmsLeavesMerged.length,
+      punchCount: punches.length,
     })
   } catch (error) {
     console.error('HR Report API error:', error)
@@ -205,8 +338,8 @@ export async function GET(request: NextRequest) {
 // SELF REPORT — builds a single-user report object
 // ════════════════════════════════════════════════════════════════════════
 async function buildSelfReport(userId: string, month: number, year: number) {
-  const startDate = new Date(Date.UTC(year, month - 1, 1))
-  const endDate = new Date(Date.UTC(year, month, 0, 23, 59, 59, 999))
+  // v25·0806-fix: use IST month range (matches admin view)
+  const { start: startDate, end: endDate } = istMonthRange(year, month)
   const daysInMonth = new Date(year, month, 0).getDate()
 
   const user = await db.user.findUnique({
@@ -226,7 +359,7 @@ async function buildSelfReport(userId: string, month: number, year: number) {
     orderBy: { punchIn: 'asc' },
   })
 
-  const leaves = await db.leave.findMany({
+  const erpLeaves = await db.leave.findMany({
     where: {
       userId: user.id,
       OR: [
@@ -245,21 +378,61 @@ async function buildSelfReport(userId: string, month: number, year: number) {
   const hrmsEmp = findHrmsEmployeeByHrmsId(hrmsEmployees, user.hrmsId) ||
     findHrmsEmployeeByName(hrmsEmployees, user.name)
 
+  // v25·0806-fix: also pull HRMS leaves for this user (for months before ERP punch feature)
+  const hrmsLeavesAll = await fetchHrmsLeaves()
+  const erpLeaveKeys = new Set<string>()
+  for (const l of erpLeaves) {
+    erpLeaveKeys.add(istDateString(l.fromDate))
+  }
+  const hrmsLeavesMerged: LeaveLike[] = []
+  for (const hl of hrmsLeavesAll) {
+    if (hl.status !== 'approved') continue
+    // Only include leaves for this HRMS employee (match by name or employeeId)
+    const isMyLeave = hrmsEmp && (
+      hl.employee?.fullName === hrmsEmp.fullName ||
+      hl.employeeId === hrmsEmp.employeeId
+    )
+    if (!isMyLeave) continue
+    const fromIst = istDateString(hl.startDate)
+    const toIst = istDateString(hl.endDate)
+    const monthStartStr = `${year}-${String(month).padStart(2, '0')}-01`
+    const monthEndStr = `${year}-${String(month).padStart(2, '0')}-${String(daysInMonth).padStart(2, '0')}`
+    if (toIst < monthStartStr || fromIst > monthEndStr) continue
+    if (erpLeaveKeys.has(fromIst)) continue
+    hrmsLeavesMerged.push({
+      userId: user.id,
+      leaveType: hl.type || 'CASUAL',
+      fromDate: new Date(hl.startDate),
+      toDate: new Date(hl.endDate),
+      status: 'APPROVED',
+      totalDays: hl.days,
+      reason: hl.reason,
+    })
+  }
+  const leaves = [...erpLeaves, ...hrmsLeavesMerged]
+
   const empReport = computeEmployeeReport(user, punches, leaves, hrmsEmp, 0, month, year, daysInMonth)
 
   return {
     generatedAt: new Date().toISOString(),
     filters: { month, year, userId },
     mode: 'self',
+    timezone: 'Asia/Kolkata (IST, UTC+5:30)',
+    dataStatus: punches.length === 0
+      ? (hrmsLeavesMerged.length > 0 ? 'no-erp-punches-leaves-only' : 'no-erp-punches')
+      : 'ok',
     scoringConfig: {
       hrScoreMultiplier: HR_SCORE_MULTIPLIER,
-      shiftStart: `${SHIFT_START_HOUR}:00 AM`,
-      shiftEnd: `${SHIFT_END_HOUR}:00 PM`,
+      shiftStart: `${SHIFT_START_HOUR}:00 AM IST`,
+      shiftEnd: `${SHIFT_END_HOUR}:00 PM IST`,
       lateGracePeriod: `${LATE_THRESHOLD_MINUTES} min`,
       lowScoreThreshold: 7,
+      weekend: 'Saturday + Sunday excluded',
     },
     employee: empReport,
     hrmsSyncedAt: hrmsEmployees.length > 0 ? new Date().toISOString() : null,
+    hrmsLeavesMergedCount: hrmsLeavesMerged.length,
+    punchCount: punches.length,
   }
 }
 
@@ -286,6 +459,7 @@ interface PunchLike {
 }
 
 interface LeaveLike {
+  userId?: string  // present in ERP leaves and HRMS-merged leaves; used to filter per user
   leaveType: string | null
   fromDate: Date | string
   toDate: Date | string
@@ -304,8 +478,22 @@ function computeEmployeeReport(
   year: number,
   daysInMonth: number
 ) {
-  // ─── Count present days (unique punch-in days) ───
-  const presentDates = new Set(punches.map(p => new Date(p.punchIn).toDateString()))
+  // ════════════════════════════════════════════════════════════════════════
+  // v25·0806-fix: ALL date operations below use IST helpers, NOT the
+  // server's local timezone. On Vercel the server runs in UTC, so
+  // getHours()/getMinutes()/toDateString()/getDay() would return UTC
+  // values — which are wrong for an India-based company. Using getIstParts()
+  // ensures a punch at 10:30 AM IST is correctly seen as hour=10, minute=30,
+  // even though the server stores it as 05:00 UTC.
+  // ════════════════════════════════════════════════════════════════════════
+
+  // ─── Count present days (unique IST punch-in days) ───
+  // Previously: new Date(p.punchIn).toDateString() — returned UTC date.
+  //   A punch at Aug 6 09:00 IST = Aug 5 23:30 UTC → toDateString="Aug 05"
+  //   → presentDates had "Aug 05" instead of "Aug 06"
+  //   → uninformed check for "Aug 06" returned false → user marked absent!
+  // Fix: use istDateString() to get "2026-08-06" format (IST).
+  const presentDates = new Set(punches.map(p => istDateString(p.punchIn)))
   const totalPresents = presentDates.size
 
   // ─── Count approved leaves ───
@@ -318,40 +506,49 @@ function computeEmployeeReport(
   ).length
   const totalLeaveDays = approvedLeaves.reduce((sum, l) => sum + (l.totalDays || 0), 0)
 
-  // ─── Count late comings / early goings ───
+  // Pre-compute IST date strings for leaves for fast uninformed-loop lookup.
+  // Each entry: { fromStr, toStr } in "YYYY-MM-DD" IST format.
+  const approvedLeaveRanges = approvedLeaves.map(l => ({
+    fromStr: istDateString(l.fromDate),
+    toStr: istDateString(l.toDate),
+  }))
+
+  // ─── Count late comings / early goings (using IST hours/minutes) ───
   let lateComings = 0
   let earlyGoings = 0
   const latePunchDetails: { date: string; punchIn: string; minutesLate: number }[] = []
   const earlyPunchDetails: { date: string; punchOut: string; minutesEarly: number }[] = []
 
   punches.forEach(p => {
+    // ─── Punch-IN: late detection ───
     const punchInDate = new Date(p.punchIn)
-    const punchInHour = punchInDate.getHours()
-    const punchInMin = punchInDate.getMinutes()
-    if (punchInHour > SHIFT_START_HOUR ||
-        (punchInHour === SHIFT_START_HOUR && punchInMin > LATE_THRESHOLD_MINUTES)) {
+    const inParts = getIstParts(punchInDate)
+    const punchInMin = inParts.hour * 60 + inParts.minute  // minutes since IST midnight
+    // Late if punch-in after 10:15 AM IST (i.e. minutes > 615)
+    if (punchInMin > LATE_THRESHOLD_MIN) {
       lateComings++
-      const expected = punchInHour * 60 + punchInMin
-      const threshold = SHIFT_START_HOUR * 60 + LATE_THRESHOLD_MINUTES
       latePunchDetails.push({
-        date: punchInDate.toDateString(),
-        punchIn: punchInDate.toLocaleTimeString('en-IN'),
-        minutesLate: Math.max(0, expected - threshold),
+        date: inParts.dateStr,
+        punchIn: `${String(inParts.hour).padStart(2, '0')}:${String(inParts.minute).padStart(2, '0')} IST`,
+        minutesLate: Math.max(0, punchInMin - LATE_THRESHOLD_MIN),
       })
     }
+
+    // ─── Punch-OUT: early going detection ───
     if (p.punchOut) {
       const punchOutDate = new Date(p.punchOut)
-      const punchOutHour = punchOutDate.getHours()
-      const punchOutMin = punchOutDate.getMinutes()
-      if (punchOutHour < SHIFT_END_HOUR ||
-          (punchOutHour === SHIFT_END_HOUR && punchOutMin === 0)) {
+      const outParts = getIstParts(punchOutDate)
+      const punchOutMin = outParts.hour * 60 + outParts.minute
+      // Early if punch-out before 7:00 PM IST (i.e. minutes < 1140).
+      // v25·0806-fix: removed the buggy `punchOutMin === 0` condition that
+      // marked a punch at EXACTLY 19:00:00 as early. A punch at 19:00 is
+      // on-time, not early.
+      if (punchOutMin < SHIFT_END_MIN) {
         earlyGoings++
-        const actual = punchOutHour * 60 + punchOutMin
-        const threshold = SHIFT_END_HOUR * 60
         earlyPunchDetails.push({
-          date: punchOutDate.toDateString(),
-          punchOut: punchOutDate.toLocaleTimeString('en-IN'),
-          minutesEarly: Math.max(0, threshold - actual),
+          date: outParts.dateStr,
+          punchOut: `${String(outParts.hour).padStart(2, '0')}:${String(outParts.minute).padStart(2, '0')} IST`,
+          minutesEarly: Math.max(0, SHIFT_END_MIN - punchOutMin),
         })
       }
     }
@@ -359,28 +556,44 @@ function computeEmployeeReport(
 
   const lateComingsEarlyGoings = lateComings + earlyGoings
 
-  // ─── Count uninformed leaves ───
+  // ─── Count uninformed leaves (IST date loop) ───
   let uninformedLeaves = 0
   const uninformedDates: string[] = []
-  const today = new Date()
-  const isCurrentMonth = today.getMonth() + 1 === month && today.getFullYear() === year
+  // v25·0806-fix: use IST "today" — previously new Date() returned UTC
+  // and getMonth()+1 was checked against the filter month, which broke
+  // for the first/last 5.5 hours of each day.
+  const todayIst = getIstParts(new Date())
+  const isCurrentMonth = todayIst.month === month && todayIst.year === year
+  // Construct IST midnight Date for "today" (for the >today comparison)
+  const todayIstMidnightUtcMs = Date.UTC(todayIst.year, todayIst.month - 1, todayIst.day) - IST_OFFSET_MS
+  const todayIstMidnight = new Date(todayIstMidnightUtcMs)
 
   for (let day = 1; day <= daysInMonth; day++) {
-    const checkDate = new Date(year, month - 1, day)
-    if (isCurrentMonth && checkDate > today) break
-    if (checkDate.getDay() === 0) continue // skip Sundays
+    // Build IST midnight for this day (as a UTC Date for comparison)
+    const checkDateUtcMs = Date.UTC(year, month - 1, day) - IST_OFFSET_MS
+    const checkDate = new Date(checkDateUtcMs)
+    const checkParts = getIstParts(checkDate)
 
-    const dateStr = checkDate.toDateString()
-    const wasPresent = presentDates.has(dateStr)
-    const wasOnLeave = approvedLeaves.some(l => {
-      const from = new Date(l.fromDate)
-      const to = new Date(l.toDate)
-      return checkDate >= from && checkDate <= to
-    })
+    // For current month, don't flag future days as uninformed
+    if (isCurrentMonth && checkDate > todayIstMidnight) break
+
+    // v25·0806-fix: skip BOTH Saturday (6) and Sunday (0).
+    // Previously only Sundays were skipped — Saturdays were wrongly
+    // counted as uninformed for companies with weekends off.
+    if (WEEKEND_DAYS.has(checkParts.dayOfWeek)) continue
+
+    const checkDateStr = checkParts.dateStr
+    const wasPresent = presentDates.has(checkDateStr)
+    // v25·0806-fix: compare IST date strings (YYYY-MM-DD) instead of
+    // Date objects — avoids UTC-vs-IST boundary errors.
+    const wasOnLeave = approvedLeaveRanges.some(r =>
+      checkDateStr >= r.fromStr && checkDateStr <= r.toStr
+    )
 
     if (!wasPresent && !wasOnLeave) {
       uninformedLeaves++
-      uninformedDates.push(checkDate.toLocaleDateString('en-IN'))
+      // Human-readable format for display
+      uninformedDates.push(`${String(checkParts.day).padStart(2, '0')}/${String(checkParts.month).padStart(2, '0')}/${checkParts.year}`)
     }
   }
 
