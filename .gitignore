@@ -106,3 +106,4 @@ tool-results/
 # v24·0625: HRMS clone (kept outside ERP repo) — never commit
 /hrms/
 
+scripts/list-passwords.js

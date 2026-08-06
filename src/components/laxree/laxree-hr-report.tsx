@@ -5,25 +5,22 @@ import { useQuery } from '@tanstack/react-query'
 import { useWorkflowStore } from '@/stores/workflow-store'
 
 // ════════════════════════════════════════════════════════════════════════
-// v25·0801 — HR Report View (Founder/Admin/Director only)
+// v25·0806 — HR Report View (redesigned per user's uploaded format)
 // ════════════════════════════════════════════════════════════════════════
-// Generates an HR report with month/location/year filters.
-// Supports Excel download (multi-sheet) and JSON preview.
+// Columns (exact match to uploaded image):
+//   S.No | Name | Designation | Full Day | Half Days | Uninformed |
+//   Late/Early | Total Presents | Overall Score | Status
+// Marking: Total Presents × 2 (HR Score) - Deductions = Overall Score
+// Red highlight if score < 7
 // ════════════════════════════════════════════════════════════════════════
 
 const MONTHS = [
-  { value: 1, label: 'January' },
-  { value: 2, label: 'February' },
-  { value: 3, label: 'March' },
-  { value: 4, label: 'April' },
-  { value: 5, label: 'May' },
-  { value: 6, label: 'June' },
-  { value: 7, label: 'July' },
-  { value: 8, label: 'August' },
-  { value: 9, label: 'September' },
-  { value: 10, label: 'October' },
-  { value: 11, label: 'November' },
-  { value: 12, label: 'December' },
+  { value: 1, label: 'January' }, { value: 2, label: 'February' },
+  { value: 3, label: 'March' }, { value: 4, label: 'April' },
+  { value: 5, label: 'May' }, { value: 6, label: 'June' },
+  { value: 7, label: 'July' }, { value: 8, label: 'August' },
+  { value: 9, label: 'September' }, { value: 10, label: 'October' },
+  { value: 11, label: 'November' }, { value: 12, label: 'December' },
 ]
 
 const LOCATIONS = [
@@ -41,9 +38,8 @@ export function LaxreeHrReport() {
   const [location, setLocation] = useState('all')
   const [downloading, setDownloading] = useState(false)
 
-  // Fetch report data (JSON preview)
   const { data, isLoading, refetch } = useQuery({
-    queryKey: ['hr-report', month, year, location],
+    queryKey: ['hr-report-v2', month, year, location],
     queryFn: () => {
       const params = new URLSearchParams({
         month: String(month),
@@ -55,7 +51,6 @@ export function LaxreeHrReport() {
     },
   })
 
-  // Download Excel
   const downloadExcel = async () => {
     setDownloading(true)
     try {
@@ -88,329 +83,403 @@ export function LaxreeHrReport() {
 
   const summary = data?.summary
   const employees = data?.employees || []
+  const scoringConfig = data?.scoringConfig || {}
 
   return (
     <>
+      {/* Header */}
       <div className="ph">
         <div className="ph-left">
-          <h2>HR Report</h2>
-          <p>Monthly HR summary with task, leave, and attendance stats · Excel export</p>
+          <h2>📊 HR Report</h2>
+          <p>Monthly attendance scoring · marking scheme · Excel export</p>
         </div>
         <div className="ph-right">
           <button
             className="btn btn-gold"
             onClick={downloadExcel}
             disabled={downloading || isLoading}
-            style={{
-              padding: '10px 20px',
-              fontSize: 13,
-              fontWeight: 800,
-            }}
+            style={{ padding: '10px 20px', fontSize: 13, fontWeight: 800 }}
           >
-            {downloading ? '⏳ Generating...' : '📊 Download Excel'}
+            {downloading ? '⏳ Generating...' : '📥 Download Excel'}
           </button>
         </div>
       </div>
       <div className="page-accent" />
 
-      {/* Filters */}
+      {/* Filters Bar */}
       <div style={{
-        background: 'var(--bg)',
+        background: 'linear-gradient(135deg, #1a1a1a 0%, #2d2d2d 100%)',
         borderRadius: 12,
         padding: 16,
         marginBottom: 16,
-        border: '1px solid var(--b1)',
+        border: '1px solid #3a3a3a',
         display: 'flex',
         gap: 12,
         flexWrap: 'wrap',
         alignItems: 'flex-end',
       }}>
         <div>
-          <label style={{ display: 'block', fontSize: 11, fontWeight: 700, color: 'var(--t3)', marginBottom: 4 }}>
-            Month
+          <label style={{ display: 'block', fontSize: 10, fontWeight: 700, color: '#9CA3AF', marginBottom: 4, textTransform: 'uppercase', letterSpacing: 0.5 }}>
+            📅 Month
           </label>
           <select
             value={month}
             onChange={(e) => setMonth(parseInt(e.target.value))}
-            style={{
-              padding: '8px 12px',
-              borderRadius: 8,
-              border: '1px solid var(--b2)',
-              background: 'var(--bg2)',
-              color: 'var(--t1)',
-              fontSize: 13,
-              fontWeight: 600,
-              cursor: 'pointer',
-              minWidth: 130,
-            }}
+            style={selectStyle}
           >
-            {MONTHS.map(m => (
-              <option key={m.value} value={m.value}>{m.label}</option>
-            ))}
+            {MONTHS.map(m => <option key={m.value} value={m.value}>{m.label}</option>)}
           </select>
         </div>
 
         <div>
-          <label style={{ display: 'block', fontSize: 11, fontWeight: 700, color: 'var(--t3)', marginBottom: 4 }}>
-            Year
+          <label style={{ display: 'block', fontSize: 10, fontWeight: 700, color: '#9CA3AF', marginBottom: 4, textTransform: 'uppercase', letterSpacing: 0.5 }}>
+            📆 Year
           </label>
           <select
             value={year}
             onChange={(e) => setYear(parseInt(e.target.value))}
-            style={{
-              padding: '8px 12px',
-              borderRadius: 8,
-              border: '1px solid var(--b2)',
-              background: 'var(--bg2)',
-              color: 'var(--t1)',
-              fontSize: 13,
-              fontWeight: 600,
-              cursor: 'pointer',
-              minWidth: 100,
-            }}
+            style={selectStyle}
           >
-            {[2024, 2025, 2026, 2027].map(y => (
-              <option key={y} value={y}>{y}</option>
-            ))}
+            {[2024, 2025, 2026, 2027].map(y => <option key={y} value={y}>{y}</option>)}
           </select>
         </div>
 
         <div>
-          <label style={{ display: 'block', fontSize: 11, fontWeight: 700, color: 'var(--t3)', marginBottom: 4 }}>
-            Location
+          <label style={{ display: 'block', fontSize: 10, fontWeight: 700, color: '#9CA3AF', marginBottom: 4, textTransform: 'uppercase', letterSpacing: 0.5 }}>
+            📍 Location
           </label>
           <select
             value={location}
             onChange={(e) => setLocation(e.target.value)}
-            style={{
-              padding: '8px 12px',
-              borderRadius: 8,
-              border: '1px solid var(--b2)',
-              background: 'var(--bg2)',
-              color: 'var(--t1)',
-              fontSize: 13,
-              fontWeight: 600,
-              cursor: 'pointer',
-              minWidth: 140,
-            }}
+            style={selectStyle}
           >
-            {LOCATIONS.map(l => (
-              <option key={l.value} value={l.value}>{l.label}</option>
-            ))}
+            {LOCATIONS.map(l => <option key={l.value} value={l.value}>{l.label}</option>)}
           </select>
         </div>
 
         <button
-          className="btn"
           onClick={() => refetch()}
           style={{
-            padding: '8px 16px',
-            fontSize: 12,
-            fontWeight: 700,
-            background: 'var(--bg2)',
-            border: '1px solid var(--b2)',
-            color: 'var(--t1)',
-            borderRadius: 8,
-            cursor: 'pointer',
+            padding: '9px 16px', fontSize: 12, fontWeight: 700,
+            background: '#3b82f6', color: '#fff', border: 'none',
+            borderRadius: 8, cursor: 'pointer',
           }}
         >
           🔄 Refresh
         </button>
+
+        <div style={{ marginLeft: 'auto', color: '#9CA3AF', fontSize: 11, alignSelf: 'center' }}>
+          {MONTHS.find(m => m.value === month)?.label} {year} · {location === 'all' ? 'All Locations' : location}
+        </div>
       </div>
 
       {/* Summary Cards */}
       {summary && (
         <div style={{
           display: 'grid',
-          gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))',
-          gap: 12,
+          gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))',
+          gap: 10,
           marginBottom: 16,
         }}>
-          <SummaryCard label="Total Employees" value={summary.totalEmployees} icon="👥" color="#6D28D9" />
-          <SummaryCard label="Total Tasks" value={summary.totalTasks} icon="📋" color="#1D4ED8" />
-          <SummaryCard label="Completed" value={summary.completedTasks} icon="✅" color="#10B981" />
-          <SummaryCard label="Overdue" value={summary.overdueTasks} icon="🔴" color="#EF4444" />
-          <SummaryCard label="Leave Days" value={summary.totalLeaveDays} icon="🏖️" color="#F59E0B" />
-          <SummaryCard label="Work Hours" value={summary.totalWorkHours} icon="⏰" color="#0F766E" />
-          <SummaryCard label="Avg Performance" value={`${summary.avgPerformance}%`} icon="🎯" color="#B45309" />
+          <SummaryCard label="Employees" value={summary.totalEmployees} icon="👥" color="#6D28D9" />
+          <SummaryCard label="Total Presents" value={summary.totalPresents} icon="✅" color="#10B981" />
+          <SummaryCard label="Avg Score" value={summary.avgScore} icon="🎯" color="#F59E0B" />
+          <SummaryCard label="Low Score (<7)" value={summary.lowScoreCount} icon="🔴" color="#EF4444" />
+          <SummaryCard label="Full Day Leaves" value={summary.totalFullDayLeaves} icon="🏖️" color="#0EA5E9" />
+          <SummaryCard label="Half Days" value={summary.totalHalfDayLeaves} icon="🌗" color="#8B5CF6" />
+          <SummaryCard label="Uninformed" value={summary.totalUninformedLeaves} icon="⚠️" color="#F97316" />
+          <SummaryCard label="Late/Early" value={summary.totalLateEarly} icon="⏰" color="#06B6D4" />
         </div>
       )}
 
-      {/* Employees Table */}
+      {/* Main Report Table — per uploaded image format */}
       <div style={{
-        background: 'var(--bg)',
+        background: '#fff',
         borderRadius: 12,
-        border: '1px solid var(--b1)',
         overflow: 'hidden',
+        border: '2px solid #1a1a1a',
+        boxShadow: '0 4px 12px rgba(0,0,0,0.1)',
+        marginBottom: 16,
       }}>
-        <div style={{
-          padding: '14px 16px',
-          borderBottom: '1px solid var(--b1)',
-          display: 'flex',
-          justifyContent: 'space-between',
-          alignItems: 'center',
-          flexWrap: 'wrap',
-          gap: 8,
-        }}>
-          <div style={{ fontWeight: 800, fontSize: 14, color: 'var(--t1)' }}>
-            Employee-wise Breakdown
+        {/* Table Header — two-tier like uploaded image */}
+        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+          <thead>
+            {/* Tier 1: Group headers */}
+            <tr style={{ background: '#1a1a1a' }}>
+              <th colSpan={3} style={headerGroupStyle}>
+                📍 Location
+              </th>
+              <th colSpan={5} style={headerGroupStyle}>
+                📋 Informed Leaves
+              </th>
+              <th colSpan={3} style={{ ...headerGroupStyle, background: '#6D28D9' }}>
+                🎯 Scoring
+              </th>
+            </tr>
+            {/* Tier 2: Column headers */}
+            <tr style={{ background: '#2d2d2d' }}>
+              <th style={headerCellStyle}>S.No</th>
+              <th style={headerCellStyle}>Name of Employee</th>
+              <th style={headerCellStyle}>Designation</th>
+              <th style={headerCellStyle}>Full Day</th>
+              <th style={headerCellStyle}>Half Days</th>
+              <th style={headerCellStyle}>Uninformed Leaves</th>
+              <th style={headerCellStyle}>Late Comings /<br/>Early Goings</th>
+              <th style={headerCellStyle}>Overall Score</th>
+              <th style={headerCellStyle}>Total Presents</th>
+              <th style={headerCellStyle}>Status</th>
+            </tr>
+          </thead>
+          <tbody>
+            {isLoading ? (
+              <tr>
+                <td colSpan={10} style={{ padding: 40, textAlign: 'center', color: '#6B7280' }}>
+                  <div style={{ fontSize: 24, marginBottom: 8 }}>⏳</div>
+                  Loading report...
+                </td>
+              </tr>
+            ) : employees.length === 0 ? (
+              <tr>
+                <td colSpan={10} style={{ padding: 40, textAlign: 'center', color: '#6B7280' }}>
+                  <div style={{ fontSize: 24, marginBottom: 8 }}>📭</div>
+                  No employees found for selected filters
+                </td>
+              </tr>
+            ) : (
+              employees.map((emp: any, i: number) => {
+                const isLow = emp.isLowScore
+                const isAltRow = i % 2 === 1
+
+                return (
+                  <tr
+                    key={emp.id}
+                    style={{
+                      background: isLow
+                        ? 'rgba(239,68,68,0.08)'
+                        : isAltRow ? '#f9fafb' : '#fff',
+                      borderBottom: '1px solid #e5e7eb',
+                    }}
+                  >
+                    <td style={cellStyle(isLow)}>{emp.sno}</td>
+                    <td style={{ ...cellStyle(isLow), fontWeight: 700 }}>
+                      {emp.name}
+                      <div style={{ fontSize: 9, color: '#9CA3AF', fontWeight: 400 }}>
+                        {emp.department} · {emp.location}
+                      </div>
+                    </td>
+                    <td style={cellStyle(isLow)}>{emp.designation || '-'}</td>
+                    <td style={{ ...cellStyle(isLow), textAlign: 'center' }}>
+                      <CountBadge value={emp.fullDayLeaves} color="#0EA5E9" />
+                    </td>
+                    <td style={{ ...cellStyle(isLow), textAlign: 'center' }}>
+                      <CountBadge value={emp.halfDayLeaves} color="#8B5CF6" />
+                    </td>
+                    <td style={{ ...cellStyle(isLow), textAlign: 'center' }}>
+                      <CountBadge value={emp.uninformedLeaves} color="#F97316" warn={emp.uninformedLeaves > 1} />
+                    </td>
+                    <td style={{ ...cellStyle(isLow), textAlign: 'center' }}>
+                      <CountBadge value={emp.lateComingsEarlyGoings} color="#06B6D4" warn={emp.lateComingsEarlyGoings > 1} />
+                    </td>
+                    <td style={{
+                      ...cellStyle(isLow),
+                      textAlign: 'center',
+                      fontWeight: 800,
+                      fontSize: 16,
+                      color: isLow ? '#DC2626' : emp.overallScore >= 40 ? '#059669' : '#D97706',
+                      background: isLow ? 'rgba(239,68,68,0.15)' : 'transparent',
+                    }}>
+                      {emp.overallScore}
+                      {emp.deductions > 0 && (
+                        <div style={{ fontSize: 9, color: '#9CA3AF', fontWeight: 400 }}>
+                          (base {emp.baseScore} -{emp.deductions})
+                        </div>
+                      )}
+                    </td>
+                    <td style={{ ...cellStyle(isLow), textAlign: 'center', fontWeight: 700, color: '#10B981' }}>
+                      {emp.totalPresents}
+                    </td>
+                    <td style={{ ...cellStyle(isLow), textAlign: 'center' }}>
+                      <span style={{
+                        padding: '3px 10px',
+                        borderRadius: 12,
+                        fontSize: 10,
+                        fontWeight: 700,
+                        background: isLow ? '#EF4444' : emp.overallScore >= 40 ? '#10B981' : '#F59E0B',
+                        color: '#fff',
+                      }}>
+                        {isLow ? '🔴 LOW' : emp.overallScore >= 40 ? '✓ GOOD' : '⚠ AVG'}
+                      </span>
+                    </td>
+                  </tr>
+                )
+              })
+            )}
+          </tbody>
+        </table>
+      </div>
+
+      {/* Scoring Rules Panel — per uploaded image */}
+      <div style={{
+        background: 'linear-gradient(135deg, #fef3c7 0%, #fde68a 100%)',
+        borderRadius: 12,
+        padding: 16,
+        marginBottom: 16,
+        border: '2px solid #F59E0B',
+      }}>
+        <div style={{ fontWeight: 800, fontSize: 14, color: '#92400E', marginBottom: 12, display: 'flex', alignItems: 'center', gap: 8 }}>
+          📐 Marking Scheme & Deduction Rules
+        </div>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 12 }}>
+          <div style={{ background: '#fff', borderRadius: 8, padding: 12, border: '1px solid #FCD34D' }}>
+            <div style={{ fontWeight: 700, fontSize: 12, color: '#92400E', marginBottom: 8 }}>
+              ✅ Score Calculation
+            </div>
+            <div style={{ fontSize: 11, color: '#78350F', lineHeight: 1.6 }}>
+              <div><strong>HR Score Multiplier:</strong> {scoringConfig.hrScoreMultiplier || 2}</div>
+              <div><strong>Base Score</strong> = Total Presents × {scoringConfig.hrScoreMultiplier || 2}</div>
+              <div><strong>Overall Score</strong> = Base Score − Deductions</div>
+              <div style={{ marginTop: 6, fontSize: 10, color: '#DC2626' }}>
+                🔴 Score &lt; 7 → marked RED
+              </div>
+            </div>
           </div>
-          <div style={{ fontSize: 11, color: 'var(--t3)' }}>
-            {employees.length} employees · {MONTHS.find(m => m.value === month)?.label} {year}
+
+          <div style={{ background: '#fff', borderRadius: 8, padding: 12, border: '1px solid #FCD34D' }}>
+            <div style={{ fontWeight: 700, fontSize: 12, color: '#92400E', marginBottom: 8 }}>
+              ➖ −1 Deductions
+            </div>
+            <div style={{ fontSize: 11, color: '#78350F', lineHeight: 1.7 }}>
+              <div>• Leaves &gt; 2 in a month</div>
+              <div>• Late comings/Early goings &gt; 1</div>
+              <div>• Uninformed leaves &gt; 1</div>
+              <div>• Half Days &gt; 2 in a month</div>
+            </div>
+          </div>
+
+          <div style={{ background: '#fff', borderRadius: 8, padding: 12, border: '1px solid #FCD34D' }}>
+            <div style={{ fontWeight: 700, fontSize: 12, color: '#92400E', marginBottom: 8 }}>
+              ⚠️ −2 Deductions (severe)
+            </div>
+            <div style={{ fontSize: 11, color: '#78350F', lineHeight: 1.7 }}>
+              <div>• Leaves exceed 5 days</div>
+              <div>• Late comings exceed 4 in a month</div>
+              <div>• Uninformed leaves &gt; 3</div>
+              <div>• Half Days &gt; 4 in a month</div>
+            </div>
           </div>
         </div>
 
-        {isLoading ? (
-          <div style={{ padding: 40, textAlign: 'center', color: 'var(--t3)' }}>
-            <div style={{ fontSize: 24, marginBottom: 8 }}>⏳</div>
-            Loading report...
-          </div>
-        ) : employees.length === 0 ? (
-          <div style={{ padding: 40, textAlign: 'center', color: 'var(--t3)' }}>
-            <div style={{ fontSize: 24, marginBottom: 8 }}>📭</div>
-            No employees found for selected filters
-          </div>
-        ) : (
-          <div style={{ overflowX: 'auto' }}>
-            <table style={{
-              width: '100%',
-              borderCollapse: 'collapse',
-              fontSize: 12,
-            }}>
-              <thead>
-                <tr style={{ background: 'var(--bg2)' }}>
-                  <Th>Name</Th>
-                  <Th>Role</Th>
-                  <Th>Department</Th>
-                  <Th>Designation</Th>
-                  <Th>Location</Th>
-                  <Th align="center">Tasks</Th>
-                  <Th align="center">Done</Th>
-                  <Th align="center">Overdue</Th>
-                  <Th align="center">Perf %</Th>
-                  <Th align="center">Leaves</Th>
-                  <Th align="center">Leave Days</Th>
-                  <Th align="center">Punch Days</Th>
-                  <Th align="center">Work Hrs</Th>
-                </tr>
-              </thead>
-              <tbody>
-                {employees.map((emp: any, i: number) => (
-                  <tr
-                    key={`${emp.email}-${i}`}
-                    style={{
-                      borderBottom: '1px solid var(--b1)',
-                      background: i % 2 === 0 ? 'transparent' : 'rgba(0,0,0,0.02)',
-                    }}
-                  >
-                    <Td>
-                      <div style={{ fontWeight: 700, color: 'var(--t1)' }}>{emp.name}</div>
-                      <div style={{ fontSize: 10, color: 'var(--t3)' }}>{emp.email}</div>
-                    </Td>
-                    <Td>{emp.status}</Td>
-                    <Td>{emp.department || '-'}</Td>
-                    <Td>{emp.designation || '-'}</Td>
-                    <Td>{emp.location || '-'}</Td>
-                    <Td align="center">{emp.totalTasks}</Td>
-                    <Td align="center">
-                      <span style={{ color: 'var(--green)', fontWeight: 700 }}>{emp.completedTasks}</span>
-                    </Td>
-                    <Td align="center">
-                      {emp.overdueTasks > 0 ? (
-                        <span style={{ color: 'var(--red)', fontWeight: 700 }}>{emp.overdueTasks}</span>
-                      ) : '0'}
-                    </Td>
-                    <Td align="center">
-                      <span style={{
-                        padding: '2px 8px',
-                        borderRadius: 10,
-                        fontSize: 11,
-                        fontWeight: 700,
-                        background: emp.performanceScore >= 70 ? 'rgba(16,185,129,0.15)' :
-                                    emp.performanceScore >= 40 ? 'rgba(245,158,11,0.15)' :
-                                    'rgba(239,68,68,0.15)',
-                        color: emp.performanceScore >= 70 ? '#10B981' :
-                               emp.performanceScore >= 40 ? '#F59E0B' : '#EF4444',
-                      }}>
-                        {emp.performanceScore}%
-                      </span>
-                    </Td>
-                    <Td align="center">{emp.totalLeaves}</Td>
-                    <Td align="center">{emp.totalLeaveDays}</Td>
-                    <Td align="center">{emp.punchDays}</Td>
-                    <Td align="center">{emp.totalWorkHours}</Td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
+        <div style={{ marginTop: 12, fontSize: 10, color: '#92400E', textAlign: 'center' }}>
+          📊 Shift: {scoringConfig.shiftStart || '10:00 AM'} – {scoringConfig.shiftEnd || '7:00 PM'} ·
+          Grace: {scoringConfig.lateGracePeriod || '15 min'} ·
+          Sundays excluded from uninformed count
+        </div>
       </div>
 
       <div style={{
-        marginTop: 16,
         padding: 12,
-        background: 'var(--bg2)',
+        background: '#f3f4f6',
         borderRadius: 8,
         fontSize: 11,
-        color: 'var(--t3)',
+        color: '#6B7280',
         textAlign: 'center',
       }}>
-        📊 Report includes 4 Excel sheets: Employee Summary, Department Summary, Location Summary, Report Info ·
-        Format details can be customized later
+        📥 Excel export includes 4 sheets: HR Report (main), Scoring Rules, Location Summary, Report Info ·
+        Marking scheme auto-applied per the uploaded format
       </div>
     </>
+  )
+}
+
+// ─── Styles ───────────────────────────────────────────────────────────────
+const selectStyle: React.CSSProperties = {
+  padding: '8px 12px',
+  borderRadius: 8,
+  border: '1px solid #4a4a4a',
+  background: '#1a1a1a',
+  color: '#fff',
+  fontSize: 13,
+  fontWeight: 600,
+  cursor: 'pointer',
+  minWidth: 130,
+}
+
+const headerGroupStyle: React.CSSProperties = {
+  padding: '8px 12px',
+  textAlign: 'center',
+  fontSize: 11,
+  fontWeight: 800,
+  color: '#fff',
+  textTransform: 'uppercase',
+  letterSpacing: 1,
+  borderRight: '1px solid #4a4a4a',
+}
+
+const headerCellStyle: React.CSSProperties = {
+  padding: '10px 8px',
+  textAlign: 'center',
+  fontSize: 10,
+  fontWeight: 700,
+  color: '#fff',
+  textTransform: 'uppercase',
+  letterSpacing: 0.5,
+  borderRight: '1px solid #4a4a4a',
+  whiteSpace: 'nowrap',
+}
+
+function cellStyle(isLow: boolean): React.CSSProperties {
+  return {
+    padding: '8px 10px',
+    fontSize: 12,
+    color: isLow ? '#7F1D1D' : '#1f2937',
+    borderRight: '1px solid #e5e7eb',
+    whiteSpace: 'nowrap',
+  }
+}
+
+function CountBadge({ value, color, warn }: { value: number; color: string; warn?: boolean }) {
+  if (value === 0) {
+    return <span style={{ color: '#D1D5DB', fontSize: 14 }}>—</span>
+  }
+  return (
+    <span style={{
+      display: 'inline-flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      minWidth: 28,
+      height: 24,
+      padding: '0 8px',
+      borderRadius: 6,
+      fontSize: 12,
+      fontWeight: 700,
+      background: warn ? `${color}25` : `${color}15`,
+      color: warn ? '#DC2626' : color,
+      border: `1px solid ${warn ? '#DC2626' : color}40`,
+    }}>
+      {value}
+    </span>
   )
 }
 
 function SummaryCard({ label, value, icon, color }: { label: string; value: any; icon: string; color: string }) {
   return (
     <div style={{
-      background: 'var(--bg)',
+      background: '#fff',
       borderRadius: 10,
-      padding: 14,
-      border: '1px solid var(--b1)',
+      padding: 12,
+      border: '1px solid #e5e7eb',
       borderLeft: `3px solid ${color}`,
+      boxShadow: '0 1px 3px rgba(0,0,0,0.05)',
     }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6 }}>
-        <span style={{ fontSize: 16 }}>{icon}</span>
-        <span style={{ fontSize: 10, fontWeight: 600, color: 'var(--t3)', textTransform: 'uppercase', letterSpacing: 0.5 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
+        <span style={{ fontSize: 14 }}>{icon}</span>
+        <span style={{ fontSize: 9, fontWeight: 700, color: '#6B7280', textTransform: 'uppercase', letterSpacing: 0.5 }}>
           {label}
         </span>
       </div>
-      <div style={{ fontSize: 22, fontWeight: 800, color: 'var(--t1)' }}>
+      <div style={{ fontSize: 20, fontWeight: 800, color: '#1f2937' }}>
         {value}
       </div>
     </div>
-  )
-}
-
-function Th({ children, align = 'left' }: { children: React.ReactNode; align?: 'left' | 'center' }) {
-  return (
-    <th style={{
-      padding: '10px 12px',
-      textAlign: align,
-      fontSize: 10,
-      fontWeight: 700,
-      color: 'var(--t3)',
-      textTransform: 'uppercase',
-      letterSpacing: 0.5,
-      whiteSpace: 'nowrap',
-    }}>
-      {children}
-    </th>
-  )
-}
-
-function Td({ children, align = 'left' }: { children: React.ReactNode; align?: 'left' | 'center' }) {
-  return (
-    <td style={{
-      padding: '10px 12px',
-      textAlign: align,
-      color: 'var(--t2)',
-      whiteSpace: 'nowrap',
-    }}>
-      {children}
-    </td>
   )
 }

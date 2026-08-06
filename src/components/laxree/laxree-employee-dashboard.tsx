@@ -6,6 +6,7 @@ import { useState } from 'react'
 import { LaxreeAttendancePanel } from './laxree-attendance-panel'
 import { LaxreeSalarySlipPanel } from './laxree-salary-slip-panel'
 import { LaxreePunchWidget } from './laxree-punch-widget'
+import { LaxreeHrReport } from './laxree-hr-report'
 
 // Avatar colors
 const AVATAR_COLORS = ['#B45309', '#6D28D9', '#0F766E', '#1D4ED8', '#BE123C', '#15803D', '#C2410C', '#7C3AED']
@@ -25,7 +26,7 @@ export function LaxreeEmployeeDashboard() {
   const userAvatarBg = avatarColor(currentUserName || 'Employee')
 
   // Tab navigation for employee dashboard
-  const [empTab, setEmpTab] = useState<'overview' | 'tasks' | 'scorecard' | 'attendance' | 'salary-slip'>('overview')
+  const [empTab, setEmpTab] = useState<'overview' | 'tasks' | 'scorecard' | 'attendance' | 'salary-slip' | 'hr-report'>('overview')
   const [taskFilter, setTaskFilter] = useState<string>('all')
 
   // NOTE: 'emp-tasks' is now a dedicated page (LaxreeEmpMyTasks) — no need to auto-switch tabs here.
@@ -145,6 +146,7 @@ export function LaxreeEmployeeDashboard() {
     { id: 'scorecard' as const, label: 'My Scorecard', icon: '📈' },
     { id: 'attendance' as const, label: 'Attendance', icon: '📅' },
     { id: 'salary-slip' as const, label: 'Salary Slip', icon: '🧾' },
+    { id: 'hr-report' as const, label: 'HR Report', icon: '📊' },
   ]
 
   return (
@@ -800,6 +802,12 @@ export function LaxreeEmployeeDashboard() {
       {/* Sourced via /api/salary-slip/bridge — never modifies HRMS data.   */}
       {empTab === 'salary-slip' && (
         <LaxreeSalarySlipPanel />
+      )}
+
+      {/* ===================== HR REPORT TAB (v25·0806) ===================== */}
+      {/* Monthly HR report with marking scheme — visible to employee for self-review */}
+      {empTab === 'hr-report' && (
+        <LaxreeHrReport />
       )}
 
       {/* ===================== RECENT ACTIVITY (always last — v24·0625-layout fix) ===================== */}
