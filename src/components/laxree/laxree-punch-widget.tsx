@@ -280,7 +280,7 @@ export function LaxreePunchWidget() {
               {todayRecords.length > 0 ? (
                 <span>✓ Completed {todayRecords.length} punch{todayRecords.length > 1 ? 'es' : ''} today</span>
               ) : (
-                <span>📍 Make sure you are within 500m of your office to punch in</span>
+                <span>📍 Make sure you are within 100m of your office to punch in</span>
               )}
             </div>
           )}
@@ -365,7 +365,7 @@ export function LaxreePunchWidget() {
         color: '#6B7280',
         textAlign: 'center',
       }}>
-        🔒 Punch requires GPS location within 500m of your assigned office · High accuracy mode enabled
+        🔒 Punch requires GPS location within 100m of your assigned office · High accuracy mode enabled
       </div>
     </div>
   )

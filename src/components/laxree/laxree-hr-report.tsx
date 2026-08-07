@@ -243,7 +243,8 @@ export function LaxreeHrReport() {
         </div>
       )}
 
-      {/* Main Report Table — per uploaded image format */}
+      {/* Main Report Table — clean single-tier header (v25·0807-fix:
+          removed LOCATION/INFORMED LEAVES/SCORING group row per founder request) */}
       <div style={{
         background: '#fff',
         borderRadius: 12,
@@ -252,23 +253,10 @@ export function LaxreeHrReport() {
         boxShadow: '0 4px 12px rgba(0,0,0,0.1)',
         marginBottom: 16,
       }}>
-        {/* Table Header — two-tier like uploaded image */}
         <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
           <thead>
-            {/* Tier 1: Group headers */}
+            {/* Single-tier column headers — clean & professional */}
             <tr style={{ background: '#1a1a1a' }}>
-              <th colSpan={3} style={headerGroupStyle}>
-                📍 Location
-              </th>
-              <th colSpan={5} style={headerGroupStyle}>
-                📋 Informed Leaves
-              </th>
-              <th colSpan={3} style={{ ...headerGroupStyle, background: '#6D28D9' }}>
-                🎯 Scoring
-              </th>
-            </tr>
-            {/* Tier 2: Column headers */}
-            <tr style={{ background: '#2d2d2d' }}>
               <th style={headerCellStyle}>S.No</th>
               <th style={headerCellStyle}>Name of Employee</th>
               <th style={headerCellStyle}>Designation</th>
@@ -398,26 +386,14 @@ const selectStyle: React.CSSProperties = {
   minWidth: 130,
 }
 
-const headerGroupStyle: React.CSSProperties = {
-  padding: '8px 12px',
+const headerCellStyle: React.CSSProperties = {
+  padding: '12px 10px',
   textAlign: 'center',
   fontSize: 11,
   fontWeight: 800,
   color: '#fff',
   textTransform: 'uppercase',
-  letterSpacing: 1,
-  // v25·0806-cls: divider line between LOCATION / INFORMED LEAVES / SCORING removed per founder request
-}
-
-const headerCellStyle: React.CSSProperties = {
-  padding: '10px 8px',
-  textAlign: 'center',
-  fontSize: 10,
-  fontWeight: 700,
-  color: '#fff',
-  textTransform: 'uppercase',
   letterSpacing: 0.5,
-  // v25·0806-cls: vertical divider lines removed per founder request
   whiteSpace: 'nowrap',
 }
 

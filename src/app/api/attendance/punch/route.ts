@@ -259,24 +259,17 @@ export async function POST(request: NextRequest) {
       office.longitude
     )
 
-    // v25·0806-fix: GPS ACCURACY TOLERANCE + MINIMUM EXPANDED RADIUS
+    // v25·0807-fix: GPS ACCURACY TOLERANCE + MINIMUM GEOFENCE RADIUS = 100m
     // Browser-reported `accuracy` is the 95% confidence radius in meters.
-    // If we reject punches purely on `distance > radiusMeters`, a user
-    // standing AT the office with ±80m GPS accuracy (common indoors) would
-    // always be rejected. We use two relaxations:
+    // We use two relaxations:
     //
     //   1. effectiveDistance = max(0, distance - gpsAccuracy)
     //      — treats the user's "best-case true position" as the basis.
     //
     //   2. effectiveRadius = max(office.radiusMeters, MINIMUM_GEOFENCE_RADIUS)
-    //      — enforces a 500m minimum so that even if office coordinates are
-    //        only accurate to a city block (common when the OfficeLocation
-    //        was seeded with generic city-center lat/lng), employees can
-    //        still punch from inside the actual office building.
-    //
-    // The DB-stored radiusMeters is honored if it is LARGER than 500m
-    // (e.g. for a campus-style office with a 1km geofence).
-    const MINIMUM_GEOFENCE_RADIUS = 500 // meters — v25·0806-fix
+    //      — enforces a 100m minimum (per Laxree policy v25·0807).
+    //        DB-stored radiusMeters is honored if it is LARGER than 100m.
+    const MINIMUM_GEOFENCE_RADIUS = 100 // meters — v25·0807-fix (was 500)
     const gpsAccuracy = typeof accuracy === 'number' && accuracy > 0 ? accuracy : 0
     const effectiveDistance = Math.max(0, distance - gpsAccuracy)
     const geofenceRadius = Math.max(office.radiusMeters || 0, MINIMUM_GEOFENCE_RADIUS)

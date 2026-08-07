@@ -1240,11 +1240,15 @@ async function buildSelfExcelResponse(selfReport: any, month: number, year: numb
     properties: { defaultRowHeight: 20 },
     views: [{ showGridLines: false }],
   })
+  // v25·0807-fix: Removed empty logo column (was causing empty space on the
+  // left side of every row below the title). Now layout uses only 2 main cols:
+  //   A: label column (also hosts the logo image at the top, rows 2-3)
+  //   B: value column (widened to 50 to fit long values like firm names)
+  //   C: thin right margin
   ws1.columns = [
-    { width: 18 },   // A: logo column (was 4 spacer, widened for logo)
-    { width: 32 },   // B: label
-    { width: 36 },   // C: value
-    { width: 4 },    // D: spacer
+    { width: 26 },   // A: label / logo column
+    { width: 50 },   // B: value column (wide for long text)
+    { width: 3 },    // C: thin margin
   ]
 
   // Load logo image (try multiple paths for Vercel/local compat)
@@ -1271,20 +1275,21 @@ async function buildSelfExcelResponse(selfReport: any, month: number, year: numb
   ws1.addRow([])
   ws1.getRow(1).height = 8
 
-  // Row 2: Title bar — "MY HR REPORT" (merged B:C) + Logo in A
-  ws1.mergeCells('B2:C2')
+  // Row 2: Title bar — "MY HR REPORT" in B2 + Logo overlay in A2:A3
+  // (Logo image sits on top of A2:A3, title text fills B2 — both get brand bg)
   const tCell = ws1.getCell('B2')
   tCell.value = 'MY HR REPORT'
   tCell.font = { name: 'Calibri', size: 22, bold: true, color: { argb: C.white } }
   tCell.fill = { type: 'pattern' as const, pattern: 'solid' as const, fgColor: { argb: C.brandDark } } as any
   tCell.alignment = { vertical: 'middle', horizontal: 'left', indent: 1 }
-  // Also fill the A column cell with brand color so the title bar looks continuous
+  // Brand bg in column A (logo sits on top)
   const aCell2 = ws1.getCell('A2')
   aCell2.fill = { type: 'pattern' as const, pattern: 'solid' as const, fgColor: { argb: C.brandDark } } as any
+  // Margin column C also gets brand bg so the bar looks continuous
+  ws1.getCell('C2').fill = { type: 'pattern' as const, pattern: 'solid' as const, fgColor: { argb: C.brandDark } } as any
   ws1.getRow(2).height = 40
 
-  // Row 3: Subtitle — employee name + period (merged B:C) + brand color in A
-  ws1.mergeCells('B3:C3')
+  // Row 3: Subtitle — employee name + period (in B3) + brand bg in A3 & C3
   const sCell = ws1.getCell('B3')
   sCell.value = `${emp.name || '—'}  ·  ${monthLabel}`
   sCell.font = { name: 'Calibri', size: 12, bold: true, color: { argb: C.white } }
@@ -1292,9 +1297,10 @@ async function buildSelfExcelResponse(selfReport: any, month: number, year: numb
   sCell.alignment = { vertical: 'middle', horizontal: 'left', indent: 1 }
   const aCell3 = ws1.getCell('A3')
   aCell3.fill = { type: 'pattern' as const, pattern: 'solid' as const, fgColor: { argb: C.brandMid } } as any
+  ws1.getCell('C3').fill = { type: 'pattern' as const, pattern: 'solid' as const, fgColor: { argb: C.brandMid } } as any
   ws1.getRow(3).height = 26
 
-  // Place the logo image spanning A2:A3 (rows 2-3, col A — total ~66px tall)
+  // Place the logo image spanning A2:A3 (col 0 → 1, rows 1 → 3)
   if (logoImageId !== null) {
     ws1.addImage(logoImageId, {
       tl: { col: 0, row: 1 } as any,
@@ -1307,15 +1313,15 @@ async function buildSelfExcelResponse(selfReport: any, month: number, year: numb
   ws1.getRow(4).height = 8
 
   // ─── IDENTITY BLOCK ────────────────────────────────────────────────────
-  // Row 5: section header "EMPLOYEE INFORMATION"
-  ws1.mergeCells('B5:C5')
-  const idHdr = ws1.getCell('B5')
+  // Row 5: section header "EMPLOYEE INFORMATION" merged across A5:B5
+  ws1.mergeCells('A5:B5')
+  const idHdr = ws1.getCell('A5')
   idHdr.value = '👤  EMPLOYEE INFORMATION'
   idHdr.font = { name: 'Calibri', size: 11, bold: true, color: { argb: C.brandDark } }
   idHdr.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: C.brandLight } }
   idHdr.alignment = { vertical: 'middle', horizontal: 'left', indent: 1 }
   idHdr.border = borderAll
-  ws1.getCell('C5').border = borderAll
+  ws1.getCell('B5').border = borderAll
   ws1.getRow(5).height = 24
 
   const identityRows: [string, any][] = [
@@ -1329,18 +1335,18 @@ async function buildSelfExcelResponse(selfReport: any, month: number, year: numb
   ]
   let r = 6
   for (const [label, value] of identityRows) {
-    const bCell = ws1.getCell(`B${r}`)
-    const cCell = ws1.getCell(`C${r}`)
-    bCell.value = label
-    bCell.font = fontLabel
-    bCell.alignment = alignLeft
-    bCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: C.identityBg } }
-    bCell.border = borderAll
-    cCell.value = value ?? '—'
-    cCell.font = fontValBold
-    cCell.alignment = alignLeft
-    cCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: C.white } }
-    cCell.border = borderAll
+    const aCellL = ws1.getCell(`A${r}`)
+    const bCellV = ws1.getCell(`B${r}`)
+    aCellL.value = label
+    aCellL.font = fontLabel
+    aCellL.alignment = alignLeft
+    aCellL.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: C.identityBg } }
+    aCellL.border = borderAll
+    bCellV.value = value ?? '—'
+    bCellV.font = fontValBold
+    bCellV.alignment = alignLeft
+    bCellV.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: C.white } }
+    bCellV.border = borderAll
     ws1.getRow(r).height = 20
     r++
   }
@@ -1351,14 +1357,14 @@ async function buildSelfExcelResponse(selfReport: any, month: number, year: numb
   r++
 
   // ─── ATTENDANCE SECTION ────────────────────────────────────────────────
-  ws1.mergeCells(`B${r}:C${r}`)
-  const atHdr = ws1.getCell(`B${r}`)
+  ws1.mergeCells(`A${r}:B${r}`)
+  const atHdr = ws1.getCell(`A${r}`)
   atHdr.value = '✅  ATTENDANCE'
   atHdr.font = fontHdr
   atHdr.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: C.attendanceHd } }
   atHdr.alignment = { vertical: 'middle', horizontal: 'left', indent: 1 }
   atHdr.border = borderAll
-  ws1.getCell(`C${r}`).border = borderAll
+  ws1.getCell(`B${r}`).border = borderAll
   ws1.getRow(r).height = 24
   r++
 
@@ -1373,18 +1379,18 @@ async function buildSelfExcelResponse(selfReport: any, month: number, year: numb
     ['Late/Early Total',   emp.lateComingsEarlyGoings, false],
   ]
   for (const [label, value, warn] of attendanceRows) {
-    const bCell = ws1.getCell(`B${r}`)
-    const cCell = ws1.getCell(`C${r}`)
-    bCell.value = label
-    bCell.font = fontLabel
-    bCell.alignment = alignLeft
-    bCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: C.attendanceBg } }
-    bCell.border = borderAll
-    cCell.value = value ?? '—'
-    cCell.font = warn ? { ...fontValBold, color: { argb: C.bad } } : fontValBold
-    cCell.alignment = alignLeft
-    cCell.fill = { type: 'pattern', pattern: 'solid', fgColor: warn ? { argb: C.badBg } : { argb: C.white } }
-    cCell.border = borderAll
+    const aCellL = ws1.getCell(`A${r}`)
+    const bCellV = ws1.getCell(`B${r}`)
+    aCellL.value = label
+    aCellL.font = fontLabel
+    aCellL.alignment = alignLeft
+    aCellL.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: C.attendanceBg } }
+    aCellL.border = borderAll
+    bCellV.value = value ?? '—'
+    bCellV.font = warn ? { ...fontValBold, color: { argb: C.bad } } : fontValBold
+    bCellV.alignment = alignLeft
+    bCellV.fill = { type: 'pattern', pattern: 'solid', fgColor: warn ? { argb: C.badBg } : { argb: C.white } }
+    bCellV.border = borderAll
     ws1.getRow(r).height = 20
     r++
   }
@@ -1395,14 +1401,14 @@ async function buildSelfExcelResponse(selfReport: any, month: number, year: numb
   r++
 
   // ─── SCORE SECTION ─────────────────────────────────────────────────────
-  ws1.mergeCells(`B${r}:C${r}`)
-  const scHdr = ws1.getCell(`B${r}`)
+  ws1.mergeCells(`A${r}:B${r}`)
+  const scHdr = ws1.getCell(`A${r}`)
   scHdr.value = '🎯  SCORE'
   scHdr.font = fontHdr
   scHdr.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: C.scoreHd } }
   scHdr.alignment = { vertical: 'middle', horizontal: 'left', indent: 1 }
   scHdr.border = borderAll
-  ws1.getCell(`C${r}`).border = borderAll
+  ws1.getCell(`B${r}`).border = borderAll
   ws1.getRow(r).height = 24
   r++
 
@@ -1413,16 +1419,16 @@ async function buildSelfExcelResponse(selfReport: any, month: number, year: numb
     ['Status', emp.status],
   ]
   for (const [label, value] of scoreRows) {
-    const bCell = ws1.getCell(`B${r}`)
-    const cCell = ws1.getCell(`C${r}`)
-    bCell.value = label
-    bCell.font = fontLabel
-    bCell.alignment = alignLeft
-    bCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: C.scoreBg } }
-    bCell.border = borderAll
+    const aCellL = ws1.getCell(`A${r}`)
+    const bCellV = ws1.getCell(`B${r}`)
+    aCellL.value = label
+    aCellL.font = fontLabel
+    aCellL.alignment = alignLeft
+    aCellL.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: C.scoreBg } }
+    aCellL.border = borderAll
 
-    cCell.value = value ?? '—'
-    cCell.alignment = alignLeft
+    bCellV.value = value ?? '—'
+    bCellV.alignment = alignLeft
 
     // Highlight overall score row specially
     if (label === 'Overall Score') {
@@ -1430,22 +1436,22 @@ async function buildSelfExcelResponse(selfReport: any, month: number, year: numb
       const isAvg = !isLow && emp.overallScore < 8
       const color = isLow ? C.bad : isAvg ? C.warn : C.good
       const bg    = isLow ? C.badBg : isAvg ? C.warnBg : C.goodBg
-      cCell.font = { name: 'Calibri', size: 14, bold: true, color: { argb: color } }
-      cCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: bg } }
+      bCellV.font = { name: 'Calibri', size: 14, bold: true, color: { argb: color } }
+      bCellV.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: bg } }
       ws1.getRow(r).height = 26
     } else if (label === 'Status') {
       const isLow = emp.isLowScore
       const isAvg = !isLow && emp.overallScore < 8
       const color = isLow ? C.bad : isAvg ? C.warn : C.good
-      cCell.font = { ...fontValBold, color: { argb: color } }
-      cCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: C.white } }
+      bCellV.font = { ...fontValBold, color: { argb: color } }
+      bCellV.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: C.white } }
       ws1.getRow(r).height = 20
     } else {
-      cCell.font = fontValBold
-      cCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: C.white } }
+      bCellV.font = fontValBold
+      bCellV.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: C.white } }
       ws1.getRow(r).height = 20
     }
-    cCell.border = borderAll
+    bCellV.border = borderAll
     r++
   }
 
@@ -1453,8 +1459,8 @@ async function buildSelfExcelResponse(selfReport: any, month: number, year: numb
   ws1.addRow([])
   ws1.getRow(r).height = 8
   r++
-  ws1.mergeCells(`B${r}:C${r}`)
-  const foot = ws1.getCell(`B${r}`)
+  ws1.mergeCells(`A${r}:B${r}`)
+  const foot = ws1.getCell(`A${r}`)
   foot.value = `Generated on ${new Date().toLocaleString('en-IN')} · Laxree ERP · HRMS-synced`
   foot.font = { name: 'Calibri', size: 9, italic: true, color: { argb: C.textMuted } }
   foot.alignment = { vertical: 'middle', horizontal: 'center' }
